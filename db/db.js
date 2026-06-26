@@ -20,7 +20,7 @@ function createConfigError(message) {
 function getMongoUri() {
     const uri = process.env.MONGODB_URI || process.env.MONGO_URI;
     if (!uri) {
-        throw createConfigError('服务配置缺少 MONGODB_URI');
+        throw createConfigError('服务配置缺少 MONGODB_URI。Netlify 部署后需要在 Project configuration > Environment variables 中设置，并确保变量对 Functions 运行时可用。');
     }
     return uri;
 }
@@ -28,7 +28,7 @@ function getMongoUri() {
 function getJwtSecret() {
     const secret = process.env.JWT_SECRET || process.env.SECRET;
     if (!secret) {
-        throw createConfigError('服务配置缺少 JWT_SECRET');
+        throw createConfigError('服务配置缺少 JWT_SECRET。Netlify 部署后需要在 Project configuration > Environment variables 中设置，并确保变量对 Functions 运行时可用。');
     }
     return secret;
 }
