@@ -1,45 +1,45 @@
 # app-server-netlify-api
 
-Netlify Functions + MongoDB 后台。
+Netlify Functions + MongoDB backend.
 
-## 必需环境变量
+## Required environment variables
 
-本地开发使用 `.env`，线上 Netlify 部署必须在 Netlify 项目环境变量中单独配置：
+Local development uses `.env`. Netlify production must configure these separately in Netlify environment variables:
 
-- `MONGODB_URI`: MongoDB Atlas 连接串
-- `JWT_SECRET`: JWT 签名密钥
-- `JWT_EXPIRES_IN`: 可选，默认 `7d`
-- `CORS_ORIGIN`: 可选，默认 `*`
-- `DNS_SERVERS`: 可选，本地 DNS 拒绝解析 MongoDB Atlas SRV 记录时使用，例如 `8.8.8.8,1.1.1.1`
+- `MONGODB_URI`: MongoDB Atlas connection string
+- `JWT_SECRET`: JWT signing secret
+- `WX_APP_ID`: WeChat Mini Program AppID
+- `WX_APP_SECRET`: WeChat Mini Program AppSecret. Keep this on the backend only.
+- `JWT_EXPIRES_IN`: optional, defaults to `7d`
+- `CORS_ORIGIN`: optional, defaults to `*`
+- `DNS_SERVERS`: optional local DNS override, for example `8.8.8.8,1.1.1.1`
 
-## Netlify 部署配置
+## Netlify environment variables
 
-在 Netlify UI 中进入：
+In Netlify UI, go to:
 
 `Project configuration > Environment variables`
 
-添加 `MONGODB_URI` 和 `JWT_SECRET`。如果当前套餐支持变量 Scope，Scope 必须包含 `Functions`，否则 Netlify Functions 运行时读不到。
+Add `MONGODB_URI`, `JWT_SECRET`, `WX_APP_ID`, and `WX_APP_SECRET`. If scopes are available, the scope must include `Functions`.
 
-也可以用 Netlify CLI：
+You can also import a local env file:
 
 ```bash
 npx netlify login
 npx netlify link
-npx netlify env:set MONGODB_URI "<mongodb-uri>" --context production --scope functions --secret
-npx netlify env:set JWT_SECRET "<jwt-secret>" --context production --scope functions --secret
+npx netlify env:import .env
 ```
 
-修改线上环境变量后需要重新部署，已部署的 Functions 不会自动拿到后设置的变量。
+After changing production environment variables, redeploy the site.
 
-
-## 本地开发
+## Local development
 
 ```bash
 npm install
 npm run dev
 ```
 
-检查语法：
+Check syntax:
 
 ```bash
 npm run check

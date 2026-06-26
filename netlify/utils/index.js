@@ -94,6 +94,7 @@ async function auth(event) {
 function createHandler(router, options = {}) {
     const publicRoutes = options.publicRoutes || [];
     const adminRoutes = options.adminRoutes || [];
+    const skipConnectRoutes = options.skipConnectRoutes || [];
 
     return async function handler(event, context) {
         if (context) {
@@ -119,7 +120,7 @@ function createHandler(router, options = {}) {
                 if (authFlag !== true) {
                     return authFlag;
                 }
-            } else {
+            } else if (!skipConnectRoutes.includes(routeName)) {
                 await connect();
             }
 
@@ -129,7 +130,9 @@ function createHandler(router, options = {}) {
 
             return normalize(await route({event, context, body}));
         } catch (err) {
-            console.error(err);
+            if (!err.statusCode || err.statusCode >= 500) {
+                console.error(err);
+            }
             return response(err.statusCode || 500, {
                 message: err.publicMessage || '服务器内部错误'
             });
