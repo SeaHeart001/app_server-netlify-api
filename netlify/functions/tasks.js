@@ -1,70 +1,69 @@
-const {Tasks} = require('../../db/task/taskModel');
 const {Messages} = require('../../db/message/messageModel');
-const {auth} = require('../utils/index')
-const headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-};
-async function add({event, body}){
+const {Tasks} = require('../../db/task/taskModel');
+const {createHandler, error} = require('../utils');
+
+async function add({event, body}) {
+    if (!body.tasks) {
+        throw error(400, '缺少参数: tasks');
+    }
+
     await Tasks.create({
         tasks: body.tasks,
         creator: event._user.id,
-    })
-    // fixme 此处设计一个消息通知
-    let sex = ''
-    if(event._user.sex === 1){
-        sex = '男'
-    }else{
-        sex = '女'
-    }
-    await Messages.create({
-        msg: `你的${sex}朋友新增了一条时光轴记录`,
-        to: event._user.relation,
-        from: event._user.id,
-        msgType: 1
-    })
+    });
 
-    return {
-        statusCode: 200,
-        body: JSON.stringify({message: '添加成功'})
-    };
+    if (event._user.relation) {
+        const sex = event._user.sex === 1 ? '男' : '女';
+        await Messages.create({
+            msg: `你的${sex}朋友新增了一条时光轴记录`,
+            to: event._user.relation,
+            from: event._user.id,
+            msgType: 1
+        });
+    }
+
+    return {message: '添加成功'};
 }
 
 async function list({event, body}) {
-    let ids = [];
-    ids.push(event._user.id);
-    event._user.relation && ids.push(event._user.relation);
-    let options = {creator: {$in: ids}}
-    const page = body.page || 1;
-    const size = body.size || 10;
-    let total = await Tasks.count(options)
-    let data = await Tasks.find(options).sort({createTime: -1}).skip((parseInt(page) - 1) * parseInt(size)).limit(parseInt(size))
-    return {
-        statusCode: 200,
-        body: JSON.stringify({total, data})
-    };
+    const ids = [event._user.id];
+    if (event._user.relation) {
+        ids.push(event._user.relation);
+    }
+
+    const options = {creator: {$in: ids}};
+    const page = Math.max(parseInt(body.page || 1, 10), 1);
+    const size = Math.min(Math.max(parseInt(body.size || 10, 10), 1), 100);
+    const total = await Tasks.countDocuments(options);
+    const data = await Tasks.find(options)
+        .sort({createTime: -1})
+        .skip((page - 1) * size)
+        .limit(size);
+
+    return {total, data};
 }
 
-async function remove({body}) {
-    let id = body.id;
-    await Tasks.deleteOne({_id: id})
-    return {
-        statusCode: 200,
-        body: JSON.stringify({message: '删除成功'})
-    };
+async function remove({event, body}) {
+    if (!body.id) {
+        throw error(400, '缺少参数: id');
+    }
+
+    const options = event._user.admin === 1
+        ? {_id: body.id}
+        : {_id: body.id, creator: event._user.id};
+    const result = await Tasks.deleteOne(options);
+
+    if (result.deletedCount === 0) {
+        throw error(404, '记录不存在或无权删除');
+    }
+
+    return {message: '删除成功'};
 }
 
 const router = {
-    add, list, remove
-}
-
-exports.handler = async function (event, context) {
-    const path = event.path.split('/').pop();
-    let body = event.body && JSON.parse(event.body);
-    let authFlag = await auth(event);
-    if (authFlag !== true) {
-        return authFlag
-    }
-    return router[path]({event, body})
+    add,
+    list,
+    remove
 };
+
+exports.handler = createHandler(router);

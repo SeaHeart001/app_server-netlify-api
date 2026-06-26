@@ -28,6 +28,6 @@ const messageSchema = new mongoose.Schema({
     },
 })
 
-const Messages = mongoose.model('messages', messageSchema);
+const Messages = mongoose.models.messages || mongoose.model('messages', messageSchema);
 
 module.exports = {Messages}

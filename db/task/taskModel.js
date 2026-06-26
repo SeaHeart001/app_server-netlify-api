@@ -17,7 +17,7 @@ const TasksSchema =new mongoose.Schema({
     },
 })
 
-const Tasks = mongoose.model('tasks', TasksSchema);
+const Tasks = mongoose.models.tasks || mongoose.model('tasks', TasksSchema);
 
 // Tasks.watch().on('change', data => {
 //     console.log(data)

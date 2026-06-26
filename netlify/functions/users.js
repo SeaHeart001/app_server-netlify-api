@@ -1,171 +1,189 @@
-const {User, SECRET} = require('../../db/user/userModel');
+const {getJwtSecret} = require('../../db/db');
 const {Messages} = require('../../db/message/messageModel');
-const {auth} = require('../utils/index')
+const {User} = require('../../db/user/userModel');
+const {createHandler, error} = require('../utils');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-};
+
+function assertRequired(body, fields) {
+    const missing = fields.filter(field => body[field] === undefined || body[field] === null || body[field] === '');
+    if (missing.length > 0) {
+        throw error(400, `缺少参数: ${missing.join(', ')}`);
+    }
+}
+
+function sanitizeUser(user) {
+    if (!user) {
+        return null;
+    }
+
+    const doc = typeof user.toObject === 'function' ? user.toObject() : user;
+    const {password, __v, ...safeUser} = doc;
+    return safeUser;
+}
+
 async function login({body}) {
-    // your server-side functionality
-    const user = await User.findOne({
-        username: body.username
-    })
+    assertRequired(body, ['username', 'password']);
+
+    const user = await User.findOne({username: body.username});
 
     if (!user) {
-        return {
-            headers,
-            statusCode: 412,
-            body: JSON.stringify({
-                message: "用户不存在",
-            })
-        };
+        throw error(412, '用户不存在');
     }
 
-    const isPasswordValid = require('bcryptjs').compareSync(
-        body.password,
-        user.password
-    )
+    const isPasswordValid = bcrypt.compareSync(body.password, user.password);
 
     if (!isPasswordValid) {
-        return {
-            headers,
-            statusCode: 412,
-            body: JSON.stringify({
-                message: "密码错误或无效",
-            })
-        };
+        throw error(412, '密码错误或无效');
     }
 
-    const token = jwt.sign({
-        id: String(user._id)
-    }, SECRET);
+    const token = jwt.sign(
+        {id: String(user._id)},
+        getJwtSecret(),
+        {expiresIn: process.env.JWT_EXPIRES_IN || '7d'}
+    );
 
-    let {username, name, avatar, admin, sex, relation, _id} = user;
+    const safeUser = sanitizeUser(user);
+    let relationUser = null;
 
-    let relationUser;
-
-    if (relation) {
-        relationUser = await User.findOne({
-            _id: relation
-        }, {password: 0})
+    if (user.relation) {
+        relationUser = sanitizeUser(await User.findById(user.relation).select('-password'));
     }
-    if(admin !== 1){
+
+    if (user.admin !== 1 && user.relation) {
         await Messages.create({
-            msg: `“${name}”已上线`,
-            to: relation,
-            from: _id,
+            msg: `“${user.name}”已上线`,
+            to: user.relation,
+            from: user.id,
             msgType: 0
-        })
+        });
     }
 
-    // 生成token
     return {
-        headers,
-        statusCode: 200,
-        body: JSON.stringify({
-            token,
-            user: {username, name, avatar, admin, sex, _id, relation: relationUser}
-        })
+        token,
+        user: {...safeUser, relation: relationUser}
     };
 }
 
 async function register({body}) {
-    const resUser = await User.findOne({
-        username: body.username
-    })
+    assertRequired(body, ['username', 'password', 'name', 'sex']);
 
-    if (resUser) {
-        return {
-            headers,
-            statusCode: 412,
-            body: JSON.stringify({
-                message: "账号已存在",
-            })
-        };
+    const exists = await User.findOne({username: body.username});
+
+    if (exists) {
+        throw error(412, '账号已存在');
     }
-    await User.create({...body})
-    // 返回出去
-    return {
-        headers,
-        statusCode: 200,
-        body: JSON.stringify({
-            message: "注册成功",
-        })
-    };
+
+    await User.create({
+        username: body.username,
+        password: body.password,
+        name: body.name,
+        avatar: body.avatar || '',
+        sex: body.sex,
+        admin: body.admin === 1 ? 1 : 0,
+        relation: body.relation
+    });
+
+    return {message: '注册成功'};
 }
 
-async function set({body}){
-    const user = await User.findOne({_id: body.id});
-    for(let k in user){
-        user[k] = body[k]
+async function set({event, body}) {
+    const id = body.id || event._user.id;
+
+    if (event._user.admin !== 1 && String(id) !== String(event._user.id)) {
+        throw error(403, '没有权限修改该用户');
     }
-    user.save();
-    return {
-        headers,
-        statusCode: 200,
-        body: JSON.stringify({
-            message: "修改成功",
-        })
-    };
+
+    const user = await User.findById(id);
+    if (!user) {
+        throw error(404, '用户不存在');
+    }
+
+    const fields = event._user.admin === 1
+        ? ['username', 'password', 'name', 'avatar', 'sex', 'admin', 'relation']
+        : ['password', 'name', 'avatar', 'sex'];
+
+    fields.forEach(field => {
+        if (body[field] !== undefined) {
+            user[field] = body[field];
+        }
+    });
+
+    await user.save();
+
+    return {message: '修改成功'};
 }
 
 async function list({body}) {
-    let options = {admin: 0};
-    const page = body.page || 1;
-    const size = body.size || 5;
-    let total = await User.count(options);
-    let list = await User.find(options).skip((parseInt(page) - 1) * parseInt(size)).limit(parseInt(size))
-    let data = [];
-    for(let i=0; i< list.length; i++){
-        let obj = {...list[i]._doc};
-        obj.relationUser = await User.findOne({_id: list[i].relation}, {password: 0})
-        data.push(obj)
-    }
-    return {
-        headers,
-        statusCode: 200,
-        body: JSON.stringify({data, total})
-    };
+    const page = Math.max(parseInt(body.page || 1, 10), 1);
+    const size = Math.min(Math.max(parseInt(body.size || 5, 10), 1), 100);
+    const options = {admin: 0};
+
+    const total = await User.countDocuments(options);
+    const users = await User.find(options)
+        .select('-password')
+        .skip((page - 1) * size)
+        .limit(size)
+        .lean();
+
+    const data = await Promise.all(users.map(async user => {
+        const relationUser = user.relation
+            ? await User.findById(user.relation).select('-password').lean()
+            : null;
+
+        return {...user, relationUser};
+    }));
+
+    return {data, total};
 }
 
-async function remove({body}) {
-    let ids = body.ids;
-    await User.remove({_id: {$in: ids}})
-    return {
-        headers,
-        statusCode: 200,
-        body: JSON.stringify({message: '删除成功'})
-    };
+async function remove({event, body}) {
+    const ids = Array.isArray(body.ids) ? body.ids : [];
+
+    if (ids.length === 0) {
+        throw error(400, '缺少参数: ids');
+    }
+
+    await User.deleteMany({
+        _id: {$in: ids.filter(id => String(id) !== String(event._user.id))}
+    });
+
+    return {message: '删除成功'};
 }
 
 async function relation({body}) {
-    let id_0 = body.ids[0];
-    let id_1 = body.ids[1];
-    let data_0 = await User.findOne({_id: id_0}, {relation: 0});
-    let data_1 = await User.findOne({_id: id_1}, {relation: 0});
-    data_0.relation = data_1.id;
-    data_0.save();
-    data_1.relation = data_0.id
-    data_1.save();
-    return {
-        headers,
-        statusCode: 200,
-        body: JSON.stringify({message: '匹配成功'})
-    };
+    const ids = Array.isArray(body.ids) ? body.ids : [];
+    if (ids.length !== 2) {
+        throw error(400, 'ids 必须包含两个用户 ID');
+    }
+
+    const [data0, data1] = await Promise.all([
+        User.findById(ids[0]),
+        User.findById(ids[1])
+    ]);
+
+    if (!data0 || !data1) {
+        throw error(404, '用户不存在');
+    }
+
+    data0.relation = data1.id;
+    data1.relation = data0.id;
+
+    await Promise.all([data0.save(), data1.save()]);
+
+    return {message: '匹配成功'};
 }
 
 const router = {
-    register, login, list, remove, relation, set
-}
-
-exports.handler = async function (event, context) {
-    const path = event.path.split('/').pop();
-    let body = event.body && JSON.parse(event.body);
-    let authFlag = await auth(event);
-    if (path !== 'login' && authFlag !== true) {
-        return {headers, ...authFlag}
-    }
-    return router[path]({event, body})
+    register,
+    login,
+    list,
+    remove,
+    relation,
+    set
 };
+
+exports.handler = createHandler(router, {
+    publicRoutes: ['login'],
+    adminRoutes: ['register', 'list', 'remove', 'relation']
+});

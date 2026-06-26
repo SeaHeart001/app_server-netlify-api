@@ -28,6 +28,6 @@ const marvelSchema = new mongoose.Schema({
     },
 })
 
-const Marvels = mongoose.model('marvels', marvelSchema);
+const Marvels = mongoose.models.marvels || mongoose.model('marvels', marvelSchema);
 
 module.exports = {Marvels}

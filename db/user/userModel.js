@@ -1,7 +1,4 @@
 const mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
-const {SECRET} = require('../db');
-
 const UserSchema = new mongoose.Schema({
 
     username:{
@@ -45,27 +42,6 @@ const UserSchema = new mongoose.Schema({
 
 })
 
-const User = mongoose.model('users', UserSchema)
+const User = mongoose.models.users || mongoose.model('users', UserSchema)
 
-const auth = (req, res, next) => {
-
-    const raw = req.headers.authorization ? String(req.headers.authorization).split(' ').pop() : '';
-    // 验证
-    jwt.verify(raw, SECRET,  async function (err, decode){
-        if(decode && decode.id){
-            req._user = await User.findById(decode.id, {password: 0});
-            next();
-        }
-        if(err){
-            setTimeout(() => {
-                res.status(422).send({
-                    code: 0,
-                    message: '身份信息异常或已过期'
-                })
-            }, 6000)
-
-        }
-    })
-}
-
-module.exports = {User, auth, SECRET}
+module.exports = {User}
