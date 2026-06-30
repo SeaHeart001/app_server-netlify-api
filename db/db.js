@@ -8,7 +8,6 @@ if (process.env.DNS_SERVERS) {
 }
 
 let connectionPromise;
-let seedPromise;
 
 function createConfigError(message) {
     const error = new Error(message);
@@ -33,37 +32,6 @@ function getJwtSecret() {
     return secret;
 }
 
-async function seedDefaultAdmin() {
-    if (seedPromise) {
-        return seedPromise;
-    }
-
-    seedPromise = (async () => {
-        const username = process.env.DEFAULT_ADMIN_USERNAME;
-        const password = process.env.DEFAULT_ADMIN_PASSWORD;
-
-        if (!username || !password) {
-            return;
-        }
-
-        const {User} = require('./user/userModel');
-        const exists = await User.findOne({username});
-
-        if (!exists) {
-            await User.create({
-                username,
-                password,
-                name: process.env.DEFAULT_ADMIN_NAME || '管理员',
-                avatar: process.env.DEFAULT_ADMIN_AVATAR || '',
-                sex: Number(process.env.DEFAULT_ADMIN_SEX || 1),
-                admin: 1
-            });
-        }
-    })();
-
-    return seedPromise;
-}
-
 async function connect() {
     if (mongoose.connection.readyState === 1) {
         return mongoose.connection;
@@ -77,8 +45,7 @@ async function connect() {
             useCreateIndex: true,
             useFindAndModify: false,
             useUnifiedTopology: true,
-        }).then(async () => {
-            await seedDefaultAdmin();
+        }).then(() => {
             return mongoose.connection;
         }).catch(err => {
             connectionPromise = null;

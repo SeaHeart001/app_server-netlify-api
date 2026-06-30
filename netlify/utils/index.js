@@ -1,6 +1,4 @@
-const {connect, getJwtSecret} = require('../../db/db');
-const {User} = require('../../db/user/userModel');
-const jwt = require('jsonwebtoken');
+const {connect} = require('../../db/db');
 
 const headers = {
     'Access-Control-Allow-Origin': process.env.CORS_ORIGIN || '*',
@@ -61,39 +59,8 @@ function normalize(result) {
     return response(200, result || {});
 }
 
-async function auth(event) {
-    const authorization = getHeader(event, 'authorization') || '';
-    const raw = String(authorization).split(' ').pop();
-
-    if (!raw) {
-        return response(401, {message: '请先登录'});
-    }
-
-    let decoded;
-    try {
-        decoded = jwt.verify(raw, getJwtSecret());
-    } catch (err) {
-        return response(401, {message: '身份信息异常或已过期'});
-    }
-
-    if (!decoded || !decoded.id) {
-        return response(401, {message: '身份信息异常或已过期'});
-    }
-
-    await connect();
-
-    const user = await User.findById(decoded.id).select('-password');
-    if (!user) {
-        return response(401, {message: '身份信息异常或已过期'});
-    }
-
-    event._user = user;
-    return true;
-}
-
 function createHandler(router, options = {}) {
     const publicRoutes = options.publicRoutes || [];
-    const adminRoutes = options.adminRoutes || [];
     const skipConnectRoutes = options.skipConnectRoutes || [];
 
     return async function handler(event, context) {
@@ -116,16 +83,9 @@ function createHandler(router, options = {}) {
             const body = parseBody(event);
 
             if (!publicRoutes.includes(routeName)) {
-                const authFlag = await auth(event);
-                if (authFlag !== true) {
-                    return authFlag;
-                }
+                await connect();
             } else if (!skipConnectRoutes.includes(routeName)) {
                 await connect();
-            }
-
-            if (adminRoutes.includes(routeName) && (!event._user || event._user.admin !== 1)) {
-                return response(403, {message: '没有权限执行该操作'});
             }
 
             return normalize(await route({event, context, body}));
@@ -140,4 +100,4 @@ function createHandler(router, options = {}) {
     };
 }
 
-module.exports = {auth, createHandler, error, headers, response};
+module.exports = {createHandler, error, getHeader, headers, response};
