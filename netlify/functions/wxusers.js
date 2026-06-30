@@ -1,8 +1,10 @@
 const {connect, getJwtSecret} = require('../../db/db');
 const {WxUser} = require('../../db/wxuser/wxUserModel');
+const {WxUserBinding} = require('../../db/wxuser/wxUserBindingModel');
 const {createHandler, error} = require('../utils');
 const {getCurrentWxUser, sanitizeWxUser} = require('../utils/wxAuth');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 
 function getRequiredEnv(name) {
     const value = process.env[name];
@@ -27,6 +29,55 @@ function pickProfile(body = {}) {
     }
 
     return profile;
+}
+
+function getUserId(user) {
+    return String(user && (user._id || user.id || user));
+}
+
+function createRelationKey(firstUserId, secondUserId) {
+    return [String(firstUserId), String(secondUserId)].sort().join(':');
+}
+
+function sanitizeAccount(user) {
+    const safeUser = sanitizeWxUser(user) || {};
+    return {
+        id: String(safeUser._id || safeUser.id || ''),
+        openid: safeUser.openid || '',
+        nickname: safeUser.nickname || '',
+        avatarUrl: safeUser.avatarUrl || '',
+        updatedAt: safeUser.updatedAt || ''
+    };
+}
+
+async function findActiveBinding(userId) {
+    return WxUserBinding.findOne({
+        members: userId,
+        status: 'active'
+    }).lean();
+}
+
+async function formatBinding(binding, currentUserId) {
+    if (!binding) {
+        return null;
+    }
+
+    const memberIds = (binding.members || []).map(String);
+    const users = await WxUser.find({_id: {$in: memberIds}}).lean();
+    const accounts = memberIds
+        .map(id => users.find(user => String(user._id) === id))
+        .filter(Boolean)
+        .map(sanitizeAccount);
+    const partner = accounts.find(account => account.id !== String(currentUserId)) || null;
+
+    return {
+        id: String(binding._id),
+        relationKey: binding.relationKey,
+        members: accounts,
+        partner,
+        status: binding.status,
+        updatedAt: binding.updatedAt
+    };
 }
 
 function signWxToken(user) {
@@ -117,13 +168,99 @@ async function profile({event, body}) {
     return {user: sanitizeWxUser(user)};
 }
 
+async function accounts({event, body}) {
+    const user = await getCurrentWxUser(event);
+    const keyword = String(body.keyword || '').trim();
+    const query = {
+        _id: {$ne: user._id}
+    };
+
+    if (keyword) {
+        query.$or = [
+            {nickname: {$regex: keyword, $options: 'i'}},
+            {openid: {$regex: keyword, $options: 'i'}}
+        ];
+    }
+
+    const users = await WxUser.find(query)
+        .sort({updatedAt: -1})
+        .limit(30)
+        .lean();
+
+    return {
+        accounts: users.map(sanitizeAccount)
+    };
+}
+
+async function relation({event}) {
+    const user = await getCurrentWxUser(event);
+    const binding = await findActiveBinding(user._id);
+
+    return {
+        relation: await formatBinding(binding, getUserId(user))
+    };
+}
+
+async function bind({event, body}) {
+    const user = await getCurrentWxUser(event);
+    const selectedUserId = String(body.userId || body.selectedUserId || '').trim();
+
+    if (!selectedUserId) {
+        throw error(400, '缺少参数: userId');
+    }
+
+    if (selectedUserId === getUserId(user)) {
+        throw error(400, '不能绑定自己');
+    }
+
+    const selectedUser = await WxUser.findById(selectedUserId);
+    if (!selectedUser) {
+        throw error(404, '账号不存在');
+    }
+
+    const now = new Date();
+    const relationKey = createRelationKey(user._id, selectedUser._id);
+    const memberIds = relationKey.split(':').map(id => mongoose.Types.ObjectId(id));
+
+    await WxUserBinding.updateMany(
+        {
+            members: {$in: [user._id, selectedUser._id]},
+            status: 'active',
+            relationKey: {$ne: relationKey}
+        },
+        {$set: {status: 'inactive', updatedAt: now}}
+    );
+
+    const binding = await WxUserBinding.findOneAndUpdate(
+        {relationKey},
+        {
+            $set: {
+                members: memberIds,
+                status: 'active',
+                updatedAt: now
+            },
+            $setOnInsert: {
+                createdAt: now
+            }
+        },
+        {new: true, upsert: true, setDefaultsOnInsert: true}
+    ).lean();
+
+    return {
+        relation: await formatBinding(binding, getUserId(user))
+    };
+}
+
 const router = {
     login,
     me,
-    profile
+    profile,
+    accounts,
+    relation,
+    bind
 };
 
 exports.handler = createHandler(router, {
-    publicRoutes: ['login', 'me', 'profile'],
-    skipConnectRoutes: ['login', 'me', 'profile']
+    publicRoutes: ['login', 'me', 'profile', 'accounts', 'relation', 'bind'],
+    skipConnectRoutes: ['login', 'me', 'profile', 'accounts', 'relation', 'bind']
 });
