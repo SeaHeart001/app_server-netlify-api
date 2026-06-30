@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "check": "node --check db/db.js && node --check db/user/userModel.js && node --check db/task/taskModel.js && node --check db/message/messageModel.js && node --check db/marvel/marvelModel.js && node --check db/wxuser/wxUserModel.js && node --check netlify/utils/index.js && node --check netlify/functions/users.js && node --check netlify/functions/tasks.js && node --check netlify/functions/messages.js && node --check netlify/functions/marvels.js && node --check netlify/functions/wxusers.js",
+    "check": "node --check db/db.js && node --check db/user/userModel.js && node --check db/task/taskModel.js && node --check db/message/messageModel.js && node --check db/marvel/marvelModel.js && node --check db/wxuser/wxUserModel.js && node --check netlify/utils/index.js && node --check netlify/utils/wxAuth.js && node --check netlify/functions/users.js && node --check netlify/functions/tasks.js && node --check netlify/functions/messages.js && node --check netlify/functions/marvels.js && node --check netlify/functions/wxusers.js && node --check netlify/functions/files.js",
     "dev": "npx --yes netlify-cli dev"
   },
   "dependencies": {
