@@ -157,57 +157,131 @@ function getGiteeHeaders(extraHeaders = {}) {
     };
 }
 
-function buildContentForm(fields) {
-    const form = new URLSearchParams();
+async function readGiteeResponse(res) {
+    const text = await res.text();
+
+    if (!text) {
+        return {};
+    }
+
+    try {
+        return JSON.parse(text);
+    } catch (err) {
+        return {raw: text.slice(0, 500)};
+    }
+}
+
+function getGiteeErrorMessage(data, fallback) {
+    if (!data) {
+        return fallback;
+    }
+
+    if (data.message) {
+        return data.message;
+    }
+
+    if (data.error_description) {
+        return data.error_description;
+    }
+
+    if (data.error) {
+        return data.error;
+    }
+
+    if (data.raw) {
+        return data.raw;
+    }
+
+    if (data.errors) {
+        return JSON.stringify(data.errors);
+    }
+
+    return fallback;
+}
+
+function logGiteeFailure(label, res, data, extra = {}) {
+    console.error(label, {
+        status: res.status,
+        statusText: res.statusText,
+        message: getGiteeErrorMessage(data, ''),
+        responseKeys: data && typeof data === 'object' ? Object.keys(data) : [],
+        response: data,
+        ...extra
+    });
+}
+
+function normalizeGiteeFileInfo(data, targetPath) {
+    if (Array.isArray(data)) {
+        return data.find(item => item && item.path === targetPath) || null;
+    }
+
+    if (data && data.path === targetPath) {
+        return data;
+    }
+
+    if (data && data.content && data.content.path === targetPath) {
+        return data.content;
+    }
+
+    if (data && data.sha && data.path) {
+        return data;
+    }
+
+    return null;
+}
+
+function buildGiteeBody(fields) {
+    const body = {};
 
     Object.keys(fields).forEach(key => {
         if (fields[key] !== undefined && fields[key] !== null && fields[key] !== '') {
-            form.set(key, fields[key]);
+            body[key] = fields[key];
         }
     });
 
-    return form;
+    return body;
+}
+
+function withVersion(url, version) {
+    if (!url || !version) {
+        return url;
+    }
+
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}v=${encodeURIComponent(version)}`;
 }
 
 async function getGiteeFile(targetPath) {
     const res = await fetch(buildGiteeUrl(targetPath, {ref: GITEE_BRANCH}), {
         headers: getGiteeHeaders()
     });
-    const data = await res.json().catch(() => ({}));
+    const data = await readGiteeResponse(res);
 
     if (res.status === 404) {
         return null;
     }
 
     if (!res.ok) {
-        console.error('Gitee file lookup failed', {
-            status: res.status,
-            message: data.message,
-            path: targetPath
-        });
-        throw error(502, data.message || 'Gitee 文件查询失败');
+        logGiteeFailure('Gitee file lookup failed', res, data, {path: targetPath});
+        throw error(502, getGiteeErrorMessage(data, 'Gitee 文件查询失败'));
     }
 
-    return data;
+    return normalizeGiteeFileInfo(data, targetPath);
 }
 
 async function listGiteeDirectory(directory) {
     const res = await fetch(buildGiteeUrl(directory, {ref: GITEE_BRANCH}), {
         headers: getGiteeHeaders()
     });
-    const data = await res.json().catch(() => ({}));
+    const data = await readGiteeResponse(res);
 
     if (res.status === 404) {
         return [];
     }
 
     if (!res.ok) {
-        console.error('Gitee directory lookup failed', {
-            status: res.status,
-            message: data.message,
-            directory
-        });
-        throw error(502, data.message || 'Gitee 目录查询失败');
+        logGiteeFailure('Gitee directory lookup failed', res, data, {directory});
+        throw error(502, getGiteeErrorMessage(data, 'Gitee 目录查询失败'));
     }
 
     return Array.isArray(data) ? data : [];
@@ -226,15 +300,11 @@ async function deleteGiteeFile(file) {
         method: 'DELETE',
         headers: getGiteeHeaders()
     });
-    const data = await res.json().catch(() => ({}));
+    const data = await readGiteeResponse(res);
 
     if (!res.ok && res.status !== 404) {
-        console.error('Gitee replaced file delete failed', {
-            status: res.status,
-            message: data.message,
-            path: file.path
-        });
-        throw error(502, data.message || 'Gitee 旧文件删除失败');
+        logGiteeFailure('Gitee replaced file delete failed', res, data, {path: file.path});
+        throw error(502, getGiteeErrorMessage(data, 'Gitee 旧文件删除失败'));
     }
 }
 
@@ -273,19 +343,18 @@ async function saveToGitee(target, base64) {
     const res = await fetch(buildGiteeUrl(target.path), {
         method,
         headers: getGiteeHeaders({
-            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+            'Content-Type': 'application/json;charset=UTF-8'
         }),
-        body: buildContentForm(body)
+        body: JSON.stringify(buildGiteeBody(body))
     });
-    const data = await res.json().catch(() => ({}));
+    const data = await readGiteeResponse(res);
 
     if (!res.ok) {
-        console.error('Gitee file save failed', {
-            status: res.status,
-            message: data.message,
-            path: target.path
+        logGiteeFailure('Gitee file save failed', res, data, {
+            path: target.path,
+            method
         });
-        throw error(502, data.message || 'Gitee 文件上传失败');
+        throw error(502, getGiteeErrorMessage(data, 'Gitee 文件上传失败'));
     }
 
     const url = data.content && data.content.download_url;
@@ -297,7 +366,8 @@ async function saveToGitee(target, base64) {
 
     return {
         operation: method === 'PUT' ? 'updated' : 'created',
-        url,
+        url: withVersion(url, data.content.sha || Date.now()),
+        rawUrl: url,
         sha: data.content.sha || '',
         raw: data
     };
@@ -312,6 +382,7 @@ async function upload({event, body}) {
 
     return {
         url: result.url,
+        rawUrl: result.rawUrl,
         path: target.path,
         name: target.name,
         directory: target.directory,
