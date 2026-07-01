@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "check": "node --check db/db.js && node --check db/wxuser/wxUserModel.js && node --check db/wxuser/wxUserBindingModel.js && node --check db/wxuser/wxUserMessageModel.js && node --check netlify/utils/index.js && node --check netlify/utils/wxAuth.js && node --check netlify/functions/wxusers.js && node --check netlify/functions/files.js && node --check netlify/edge-functions/sse.js",
+    "check": "node --check db/db.js && node --check db/wxuser/wxUserModel.js && node --check db/wxuser/wxUserBindingModel.js && node --check db/message/wxMessageModel.js && node --check netlify/utils/index.js && node --check netlify/utils/wxAuth.js && node --check netlify/utils/wxRelations.js && node --check netlify/utils/wxMessages.js && node --check netlify/functions/wxusers.js && node --check netlify/functions/relations.js && node --check netlify/functions/messages.js && node --check netlify/functions/files.js && node --check netlify/edge-functions/sse.js",
     "dev": "npx --yes netlify-cli dev"
   },
   "dependencies": {

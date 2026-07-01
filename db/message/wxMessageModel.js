@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const WxUserMessageSchema = new mongoose.Schema({
+const WxMessageSchema = new mongoose.Schema({
     type: {
         type: String,
         required: true,
@@ -37,7 +37,12 @@ const WxUserMessageSchema = new mongoose.Schema({
             return {};
         }
     },
-    state: {
+    actionState: {
+        type: String,
+        default: 'none',
+        index: true
+    },
+    deliveryState: {
         type: String,
         default: 'pending',
         index: true
@@ -65,14 +70,15 @@ const WxUserMessageSchema = new mongoose.Schema({
     }
 });
 
-WxUserMessageSchema.index({toUser: 1, state: 1, createdAt: 1});
-WxUserMessageSchema.index({fromUser: 1, toUser: 1, type: 1, state: 1});
+WxMessageSchema.index({toUser: 1, actionState: 1, readAt: 1, createdAt: 1});
+WxMessageSchema.index({toUser: 1, deliveryState: 1, createdAt: 1});
+WxMessageSchema.index({fromUser: 1, toUser: 1, type: 1, actionState: 1});
 
-WxUserMessageSchema.pre('save', function (next) {
+WxMessageSchema.pre('save', function (next) {
     this.updatedAt = new Date();
     next();
 });
 
-const WxUserMessage = mongoose.models.wxusermessages || mongoose.model('wxusermessages', WxUserMessageSchema);
+const WxMessage = mongoose.models.wxusermessages || mongoose.model('wxusermessages', WxMessageSchema);
 
-module.exports = {WxUserMessage};
+module.exports = {WxMessage};
