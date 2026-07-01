@@ -197,7 +197,15 @@ async function publishRealtimeEvent(realtimeEvent, userIds, event) {
                 status: res.status,
                 body: await res.text().catch(() => '')
             });
+            return;
         }
+
+        const data = await res.json().catch(() => ({}));
+        console.info('SSE publish result', {
+            targets,
+            delivered: data.delivered || 0,
+            endpoint
+        });
     } catch (err) {
         console.warn('SSE publish failed', err && err.message ? err.message : err);
     }

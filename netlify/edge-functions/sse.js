@@ -5,6 +5,9 @@ const state = globalThis.__wxSseState || {
 
 globalThis.__wxSseState = state;
 
+const HEARTBEAT_INTERVAL = 5000;
+const EVENT_PADDING = `:${' '.repeat(2048)}\n\n`;
+
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-sse-secret',
@@ -116,8 +119,7 @@ function getToken(request) {
 }
 
 function writeEvent(controller, name, data) {
-    controller.enqueue(encoder.encode(`event: ${name}\n`));
-    controller.enqueue(encoder.encode(`data: ${JSON.stringify(data || {})}\n\n`));
+    controller.enqueue(encoder.encode(`event: ${name}\ndata: ${JSON.stringify(data || {})}\n\n${EVENT_PADDING}`));
 }
 
 function addClient(userId, client) {
@@ -125,6 +127,14 @@ function addClient(userId, client) {
     const clients = state.channels.get(key) || new Set();
     clients.add(client);
     state.channels.set(key, clients);
+}
+
+function getTotalClientCount() {
+    let count = 0;
+    state.channels.forEach(clients => {
+        count += clients.size;
+    });
+    return count;
 }
 
 function removeClient(userId, client) {
@@ -140,26 +150,21 @@ function removeClient(userId, client) {
     }
 }
 
-async function sendPendingEvents(request, controller, token) {
-    const url = new URL('/.netlify/functions/wxusers/events', request.url);
-    const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-        },
-        body: '{}'
-    });
-
-    if (!res.ok) {
-        writeEvent(controller, 'error', {message: '未处理消息获取失败'});
-        return;
+function sendClientEvent(client, event) {
+    if (!event) {
+        return false;
     }
 
-    const data = await res.json();
-    (data.events || []).forEach(event => {
-        writeEvent(controller, 'message', event);
-    });
+    const eventId = event.id ? String(event.id) : '';
+    if (eventId && client.sentIds.has(eventId)) {
+        return false;
+    }
+
+    client.send(event);
+    if (eventId) {
+        client.sentIds.add(eventId);
+    }
+    return true;
 }
 
 async function openStream(request) {
@@ -171,6 +176,8 @@ async function openStream(request) {
     const body = new ReadableStream({
         start(controller) {
             const client = {
+                userId,
+                sentIds: new Set(),
                 send(event) {
                     writeEvent(controller, 'message', event);
                 }
@@ -198,13 +205,15 @@ async function openStream(request) {
                 } catch (err) {
                     cleanup();
                 }
-            }, 25000);
+            }, HEARTBEAT_INTERVAL);
 
             addClient(userId, client);
-            writeEvent(controller, 'ready', {userId, at: Date.now()});
-            sendPendingEvents(request, controller, token).catch(err => {
-                writeEvent(controller, 'error', {message: err && err.message ? err.message : '未处理消息获取失败'});
+            console.info('SSE client connected', {
+                userId,
+                totalClients: getTotalClientCount(),
+                channels: state.channels.size
             });
+            writeEvent(controller, 'ready', {userId, at: Date.now()});
 
             request.signal.addEventListener('abort', cleanup);
         },
@@ -250,12 +259,20 @@ async function publish(request) {
 
         Array.from(clients).forEach(client => {
             try {
-                client.send(event);
-                delivered += 1;
+                if (sendClientEvent(client, event)) {
+                    delivered += 1;
+                }
             } catch (err) {
                 clients.delete(client);
             }
         });
+    });
+
+    console.info('SSE publish', {
+        userIds,
+        delivered,
+        totalClients: getTotalClientCount(),
+        channels: state.channels.size
     });
 
     return jsonResponse(200, {ok: true, delivered});
