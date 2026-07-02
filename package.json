@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "check": "node --check db/index.js && node --check db/model/userModel.js && node --check db/model/relationModel.js && node --check db/model/messageModel.js && node --check netlify/utils/index.js && node --check netlify/utils/auth.js && node --check netlify/utils/relations.js && node --check netlify/utils/messages.js && node --check netlify/functions/users.js && node --check netlify/functions/relations.js && node --check netlify/functions/messages.js && node --check netlify/functions/files.js && node --check netlify/edge-functions/sse.js",
+    "check": "node --check db/index.js && node --check db/model/userModel.js && node --check db/model/relationModel.js && node --check db/model/messageModel.js && node --check netlify/utils/index.js && node --check netlify/utils/auth.js && node --check netlify/utils/relations.js && node --check netlify/utils/messages.js && node --check netlify/utils/messageHandlers/messageActions.js && node --check netlify/utils/messageHandlers/relationHandler.js && node --check netlify/functions/users.js && node --check netlify/functions/relations.js && node --check netlify/functions/messages.js && node --check netlify/functions/files.js && node --check netlify/edge-functions/sse.js",
     "dev": "npx --yes netlify-cli dev"
   },
   "dependencies": {

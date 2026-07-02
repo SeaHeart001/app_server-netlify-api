@@ -10,6 +10,7 @@ const {
     formatMessageEvent,
     publishRealtimeEvent
 } = require('../utils/messages');
+const {ACTION_KINDS} = require('../utils/messageHandlers/messageActions');
 const {
     createRelationKey,
     findActiveBindingByRelationKey,
@@ -57,6 +58,7 @@ async function bindRequest({event, body}) {
         title: '绑定申请',
         content: `${getAccountName(user)} 请求与你绑定账号`,
         payload: {
+            actionKind: ACTION_KINDS.RELATION_BIND,
             relationKey
         },
         actionState: ACTION_STATES.PENDING,

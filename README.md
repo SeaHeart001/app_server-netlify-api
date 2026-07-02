@@ -266,6 +266,8 @@ npx netlify env:import .env
 
 消息统一动作接口。
 
+这个接口只负责统一鉴权、读取消息、判断动作，并统一把消息写成 `accepted` 或 `declined`。具体业务副作用会按 `payload.actionKind` 分发到 `netlify/utils/messageHandlers/*`。当前绑定关系使用 `actionKind: "relation.bind"`，由 `messageHandlers/relationHandler.js` 处理；后续新增类似“需要对方同意”的业务时，新增一个 handler 并注册到 `messageHandlers/messageActions.js` 即可。
+
 请求体：
 
 ```json
