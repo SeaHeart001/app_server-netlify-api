@@ -1,20 +1,22 @@
 const mongoose = require('mongoose');
-const {WxUser} = require('../../db/wxuser/wxUserModel');
-const {WxMessage} = require('../../db/message/wxMessageModel');
+const {User} = require('../../db/model/userModel');
+const {Message} = require('../../db/model/messageModel');
 const {createHandler, error} = require('../utils');
-const {getCurrentWxUser} = require('../utils/wxAuth');
+const {getCurrentUser} = require('../utils/auth');
 const {
-    BINDING_REQUEST,
+    ACTION_STATES,
+    DELIVERY_STATES,
+    MESSAGE_TYPES,
     formatMessageEvent,
     publishRealtimeEvent
-} = require('../utils/wxMessages');
+} = require('../utils/messages');
 const {
     createRelationKey,
     findActiveBindingByRelationKey,
     formatBinding,
     getAccountName,
     getUserId
-} = require('../utils/wxRelations');
+} = require('../utils/relations');
 
 function assertValidObjectId(value, fieldName) {
     if (!value || !mongoose.Types.ObjectId.isValid(value)) {
@@ -23,7 +25,7 @@ function assertValidObjectId(value, fieldName) {
 }
 
 async function bindRequest({event, body}) {
-    const user = await getCurrentWxUser(event);
+    const user = await getCurrentUser(event);
     const selectedUserId = String(body.userId || body.selectedUserId || '').trim();
 
     assertValidObjectId(selectedUserId, 'userId');
@@ -32,7 +34,7 @@ async function bindRequest({event, body}) {
         throw error(400, '不能绑定自己');
     }
 
-    const selectedUser = await WxUser.findById(selectedUserId);
+    const selectedUser = await User.findById(selectedUserId);
     if (!selectedUser) {
         throw error(404, '账号不存在');
     }
@@ -47,8 +49,8 @@ async function bindRequest({event, body}) {
     }
 
     const now = new Date();
-    const requestMessage = await WxMessage.create({
-        type: BINDING_REQUEST,
+    const requestMessage = await Message.create({
+        type: MESSAGE_TYPES.BINDING_REQUEST,
         fromUser: user._id,
         toUser: selectedUser._id,
         relationKey,
@@ -57,8 +59,8 @@ async function bindRequest({event, body}) {
         payload: {
             relationKey
         },
-        actionState: 'pending',
-        deliveryState: 'pending',
+        actionState: ACTION_STATES.PENDING,
+        deliveryState: DELIVERY_STATES.PENDING,
         createdAt: now,
         updatedAt: now
     });

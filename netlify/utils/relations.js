@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
-const {WxUser} = require('../../db/wxuser/wxUserModel');
-const {WxUserBinding} = require('../../db/wxuser/wxUserBindingModel');
-const {sanitizeWxUser} = require('./wxAuth');
+const {User} = require('../../db/model/userModel');
+const {Relation} = require('../../db/model/relationModel');
+const {sanitizeUser} = require('./auth');
 
 function getUserId(user) {
     return String(user && (user._id || user.id || user));
@@ -12,9 +12,10 @@ function createRelationKey(firstUserId, secondUserId) {
 }
 
 function sanitizeAccount(user) {
-    const safeUser = sanitizeWxUser(user) || {};
+    const safeUser = sanitizeUser(user) || {};
     return {
         id: String(safeUser._id || safeUser.id || ''),
+        account: safeUser.account || '',
         openid: safeUser.openid || '',
         nickname: safeUser.nickname || '',
         avatarUrl: safeUser.avatarUrl || '',
@@ -24,18 +25,18 @@ function sanitizeAccount(user) {
 
 function getAccountName(user) {
     const account = sanitizeAccount(user);
-    return account.nickname || account.openid || '微信用户';
+    return account.nickname || account.account || account.openid || '用户';
 }
 
 async function findActiveBinding(userId) {
-    return WxUserBinding.findOne({
+    return Relation.findOne({
         members: userId,
         status: 'active'
     }).lean();
 }
 
 async function findActiveBindingByRelationKey(relationKey) {
-    return WxUserBinding.findOne({
+    return Relation.findOne({
         relationKey,
         status: 'active'
     }).lean();
@@ -47,7 +48,7 @@ async function formatBinding(binding, currentUserId) {
     }
 
     const memberIds = (binding.members || []).map(String);
-    const users = await WxUser.find({_id: {$in: memberIds}}).lean();
+    const users = await User.find({_id: {$in: memberIds}}).lean();
     const accounts = memberIds
         .map(id => users.find(user => String(user._id) === id))
         .filter(Boolean)
@@ -69,7 +70,7 @@ async function activateBinding(firstUserId, secondUserId) {
     const relationKey = createRelationKey(firstUserId, secondUserId);
     const memberIds = relationKey.split(':').map(id => mongoose.Types.ObjectId(id));
 
-    await WxUserBinding.updateMany(
+    await Relation.updateMany(
         {
             members: {$in: [mongoose.Types.ObjectId(firstUserId), mongoose.Types.ObjectId(secondUserId)]},
             status: 'active',
@@ -78,7 +79,7 @@ async function activateBinding(firstUserId, secondUserId) {
         {$set: {status: 'inactive', updatedAt: now}}
     );
 
-    return WxUserBinding.findOneAndUpdate(
+    return Relation.findOneAndUpdate(
         {relationKey},
         {
             $set: {

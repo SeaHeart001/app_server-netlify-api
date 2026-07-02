@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const WxUserBindingSchema = new mongoose.Schema({
+const RelationSchema = new mongoose.Schema({
     members: {
         type: [mongoose.Schema.Types.ObjectId],
         required: true,
@@ -8,7 +8,7 @@ const WxUserBindingSchema = new mongoose.Schema({
             validator(value) {
                 return Array.isArray(value) && value.length === 2 && String(value[0]) !== String(value[1]);
             },
-            message: 'binding requires two different users'
+            message: 'relation requires two different users'
         }
     },
     relationKey: {
@@ -36,13 +36,13 @@ const WxUserBindingSchema = new mongoose.Schema({
     }
 });
 
-WxUserBindingSchema.index({members: 1, status: 1});
+RelationSchema.index({members: 1, status: 1});
 
-WxUserBindingSchema.pre('save', function (next) {
+RelationSchema.pre('save', function (next) {
     this.updatedAt = new Date();
     next();
 });
 
-const WxUserBinding = mongoose.models.wxuserbindings || mongoose.model('wxuserbindings', WxUserBindingSchema);
+const Relation = mongoose.models.userbindings || mongoose.model('userbindings', RelationSchema);
 
-module.exports = {WxUserBinding};
+module.exports = {Relation};

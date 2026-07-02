@@ -1,9 +1,9 @@
 const encoder = new TextEncoder();
-const state = globalThis.__wxSseState || {
+const state = globalThis.__sseState || {
     channels: new Map()
 };
 
-globalThis.__wxSseState = state;
+globalThis.__sseState = state;
 
 const HEARTBEAT_INTERVAL = 5000;
 const EVENT_PADDING = `:${' '.repeat(2048)}\n\n`;
@@ -94,7 +94,7 @@ async function verifyJwt(token) {
     }
 
     const decoded = JSON.parse(base64UrlToString(payload));
-    if (!decoded || decoded.type !== 'wxuser' || !decoded.id) {
+    if (!decoded || decoded.type !== 'user' || !decoded.id) {
         throw new Error('身份信息异常或已过期');
     }
 

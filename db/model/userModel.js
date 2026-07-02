@@ -1,19 +1,35 @@
 const mongoose = require('mongoose');
 
-const WxUserSchema = new mongoose.Schema({
+const LOGIN_SOURCES = ['password', 'mini_program'];
+
+const UserSchema = new mongoose.Schema({
+    account: {
+        type: String,
+        unique: true,
+        index: true,
+        sparse: true,
+        trim: true,
+        lowercase: true
+    },
+    passwordHash: {
+        type: String,
+        default: ''
+    },
     openid: {
         type: String,
-        required: true,
         unique: true,
-        index: true
+        index: true,
+        sparse: true
     },
     unionid: {
         type: String,
         index: true,
         sparse: true
     },
-    sessionKey: {
-        type: String
+    loginSource: {
+        type: String,
+        enum: [...LOGIN_SOURCES, ''],
+        default: ''
     },
     nickname: {
         type: String,
@@ -60,11 +76,25 @@ const WxUserSchema = new mongoose.Schema({
     }
 });
 
-WxUserSchema.pre('save', function (next) {
+UserSchema.pre('validate', function (next) {
+    if (!this.account && !this.openid) {
+        next(new Error('user requires account or openid'));
+        return;
+    }
+
+    if (this.account && !this.passwordHash) {
+        next(new Error('password user requires passwordHash'));
+        return;
+    }
+
+    next();
+});
+
+UserSchema.pre('save', function (next) {
     this.updatedAt = new Date();
     next();
 });
 
-const WxUser = mongoose.models.wxusers || mongoose.model('wxusers', WxUserSchema);
+const User = mongoose.models.users || mongoose.model('users', UserSchema);
 
-module.exports = {WxUser};
+module.exports = {LOGIN_SOURCES, User};

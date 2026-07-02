@@ -1,19 +1,32 @@
-const {connect, getJwtSecret} = require('../../db/db');
-const {WxUser} = require('../../db/wxuser/wxUserModel');
+const {connect, getJwtSecret} = require('../../db');
+const {User} = require('../../db/model/userModel');
 const jwt = require('jsonwebtoken');
 const {error} = require('./index');
 
-function sanitizeWxUser(user) {
+function sanitizeUser(user) {
     if (!user) {
         return null;
     }
 
     const doc = typeof user.toObject === 'function' ? user.toObject() : user;
-    const {sessionKey, __v, ...safeUser} = doc;
+    const {passwordHash, __v, ...safeUser} = doc;
     return safeUser;
 }
 
-async function getCurrentWxUser(event) {
+function signUserToken(user) {
+    return jwt.sign(
+        {
+            id: String(user._id),
+            account: user.account,
+            openid: user.openid,
+            type: 'user'
+        },
+        getJwtSecret(),
+        {expiresIn: process.env.JWT_EXPIRES_IN || '7d'}
+    );
+}
+
+async function getCurrentUser(event) {
     const headerKey = Object.keys(event.headers || {}).find(key => key.toLowerCase() === 'authorization');
     const raw = headerKey ? String(event.headers[headerKey]).split(' ').pop() : '';
 
@@ -28,13 +41,13 @@ async function getCurrentWxUser(event) {
         throw error(401, '身份信息异常或已过期');
     }
 
-    if (!decoded || decoded.type !== 'wxuser' || !decoded.id) {
+    if (!decoded || decoded.type !== 'user' || !decoded.id) {
         throw error(401, '身份信息异常或已过期');
     }
 
     await connect();
 
-    const user = await WxUser.findById(decoded.id);
+    const user = await User.findById(decoded.id);
     if (!user) {
         throw error(401, '身份信息异常或已过期');
     }
@@ -42,4 +55,4 @@ async function getCurrentWxUser(event) {
     return user;
 }
 
-module.exports = {getCurrentWxUser, sanitizeWxUser};
+module.exports = {getCurrentUser, sanitizeUser, signUserToken};

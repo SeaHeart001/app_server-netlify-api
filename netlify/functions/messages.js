@@ -1,38 +1,39 @@
-const {WxMessage} = require('../../db/message/wxMessageModel');
-const {WxUser} = require('../../db/wxuser/wxUserModel');
+const mongoose = require('mongoose');
+const {Message} = require('../../db/model/messageModel');
+const {User} = require('../../db/model/userModel');
 const {createHandler, error} = require('../utils');
-const {getCurrentWxUser} = require('../utils/wxAuth');
+const {getCurrentUser} = require('../utils/auth');
 const {
-    BINDING_ACCEPTED,
-    BINDING_DECLINED,
-    RELATION_CHANGED,
+    ACTION_STATES,
+    DELIVERY_STATES,
+    MESSAGE_TYPES,
     expireRelatedBindingRequests,
     formatMessageEvent,
     getPendingBindingQuery,
     getUnreadMessageQuery,
     markMessageDelivered,
     publishRealtimeEvent
-} = require('../utils/wxMessages');
+} = require('../utils/messages');
 const {
     activateBinding,
     formatBinding,
     getAccountName,
     getUserId
-} = require('../utils/wxRelations');
+} = require('../utils/relations');
 
 function assertValidObjectId(value, fieldName) {
-    if (!value || !require('mongoose').Types.ObjectId.isValid(value)) {
+    if (!value || !mongoose.Types.ObjectId.isValid(value)) {
         throw error(400, `参数 ${fieldName} 无效`);
     }
 }
 
 async function readMessage({event, body}) {
-    const user = await getCurrentWxUser(event);
+    const user = await getCurrentUser(event);
     const messageId = String(body.messageId || body.id || '').trim();
 
     assertValidObjectId(messageId, 'messageId');
 
-    await WxMessage.updateOne(
+    await Message.updateOne(
         {
             _id: messageId,
             toUser: user._id,
@@ -50,12 +51,12 @@ async function readMessage({event, body}) {
 }
 
 async function bindAccept({event, body}) {
-    const user = await getCurrentWxUser(event);
+    const user = await getCurrentUser(event);
     const messageId = String(body.messageId || body.requestId || '').trim();
 
     assertValidObjectId(messageId, 'messageId');
 
-    const requestMessage = await WxMessage.findOne(getPendingBindingQuery({
+    const requestMessage = await Message.findOne(getPendingBindingQuery({
         _id: messageId,
         toUser: user._id
     }));
@@ -64,7 +65,7 @@ async function bindAccept({event, body}) {
         throw error(404, '绑定申请不存在或已处理');
     }
 
-    const requester = await WxUser.findById(requestMessage.fromUser);
+    const requester = await User.findById(requestMessage.fromUser);
     if (!requester) {
         throw error(404, '申请账号不存在');
     }
@@ -72,7 +73,7 @@ async function bindAccept({event, body}) {
     const binding = await activateBinding(user._id, requester._id);
     const now = new Date();
 
-    requestMessage.actionState = 'accepted';
+    requestMessage.actionState = ACTION_STATES.ACCEPTED;
     requestMessage.handledAt = now;
     requestMessage.readAt = now;
     requestMessage.updatedAt = now;
@@ -80,8 +81,8 @@ async function bindAccept({event, body}) {
 
     await expireRelatedBindingRequests(requestMessage._id, [user._id, requester._id]);
 
-    const notice = await WxMessage.create({
-        type: BINDING_ACCEPTED,
+    const notice = await Message.create({
+        type: MESSAGE_TYPES.BINDING_ACCEPTED,
         fromUser: user._id,
         toUser: requester._id,
         relationKey: binding.relationKey,
@@ -90,8 +91,8 @@ async function bindAccept({event, body}) {
         payload: {
             relationKey: binding.relationKey
         },
-        actionState: 'none',
-        deliveryState: 'pending',
+        actionState: ACTION_STATES.NONE,
+        deliveryState: DELIVERY_STATES.PENDING,
         createdAt: now,
         updatedAt: now
     });
@@ -102,8 +103,8 @@ async function bindAccept({event, body}) {
 
     await publishRealtimeEvent(requesterEvent, [getUserId(requester)], event);
     await publishRealtimeEvent({
-        id: `${RELATION_CHANGED}:${binding.relationKey}:${Date.now()}`,
-        type: RELATION_CHANGED,
+        id: `${MESSAGE_TYPES.RELATION_CHANGED}:${binding.relationKey}:${Date.now()}`,
+        type: MESSAGE_TYPES.RELATION_CHANGED,
         title: '关系已更新',
         content: '绑定关系已完成',
         relationKey: binding.relationKey,
@@ -117,12 +118,12 @@ async function bindAccept({event, body}) {
 }
 
 async function bindDecline({event, body}) {
-    const user = await getCurrentWxUser(event);
+    const user = await getCurrentUser(event);
     const messageId = String(body.messageId || body.requestId || '').trim();
 
     assertValidObjectId(messageId, 'messageId');
 
-    const requestMessage = await WxMessage.findOne(getPendingBindingQuery({
+    const requestMessage = await Message.findOne(getPendingBindingQuery({
         _id: messageId,
         toUser: user._id
     }));
@@ -131,18 +132,18 @@ async function bindDecline({event, body}) {
         throw error(404, '绑定申请不存在或已处理');
     }
 
-    const requester = await WxUser.findById(requestMessage.fromUser);
+    const requester = await User.findById(requestMessage.fromUser);
     const now = new Date();
 
-    requestMessage.actionState = 'declined';
+    requestMessage.actionState = ACTION_STATES.DECLINED;
     requestMessage.handledAt = now;
     requestMessage.readAt = now;
     requestMessage.updatedAt = now;
     await requestMessage.save();
 
     if (requester) {
-        const notice = await WxMessage.create({
-            type: BINDING_DECLINED,
+        const notice = await Message.create({
+            type: MESSAGE_TYPES.BINDING_DECLINED,
             fromUser: user._id,
             toUser: requester._id,
             relationKey: requestMessage.relationKey,
@@ -151,8 +152,8 @@ async function bindDecline({event, body}) {
             payload: {
                 relationKey: requestMessage.relationKey
             },
-            actionState: 'none',
-            deliveryState: 'pending',
+            actionState: ACTION_STATES.NONE,
+            deliveryState: DELIVERY_STATES.PENDING,
             createdAt: now,
             updatedAt: now
         });
@@ -184,8 +185,8 @@ async function messageAction({event, body}) {
 }
 
 async function events({event}) {
-    const user = await getCurrentWxUser(event);
-    const messages = await WxMessage.find(getUnreadMessageQuery(user._id))
+    const user = await getCurrentUser(event);
+    const messages = await Message.find(getUnreadMessageQuery(user._id))
         .sort({createdAt: 1})
         .limit(30)
         .lean();

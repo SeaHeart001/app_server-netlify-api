@@ -56,11 +56,4 @@ async function connect() {
     return connectionPromise;
 }
 
-function t_Socket(io, socket) {
-    socket.on('message', (obj) => {
-        console.log(obj, 't-s');
-        io.emit('message', obj);
-    });
-}
-
-module.exports = {connect, getJwtSecret, t_Socket};
+module.exports = {connect, getJwtSecret};

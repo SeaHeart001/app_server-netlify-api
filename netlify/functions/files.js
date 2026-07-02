@@ -1,5 +1,5 @@
 const {createHandler, error} = require('../utils');
-const {getCurrentWxUser} = require('../utils/wxAuth');
+const {getCurrentUser} = require('../utils/auth');
 
 const GITEE_OWNER = 'seaheart1027';
 const GITEE_REPO = 'files_block';
@@ -114,7 +114,7 @@ function normalizeNameMode(value) {
 
 function buildTargetPath(body, user, extension) {
     const directory = sanitizeDirectory(body.directory || body.path);
-    const userId = sanitizeSegment(user._id || user.id || user.openid);
+    const userId = sanitizeSegment(user._id || user.id || user.account);
     const nameMode = normalizeNameMode(body.nameMode || body.mode);
     const rawName = body.name || body.key || getFileBaseName(body.fileName) || 'file';
     const baseName = sanitizeSegment(rawName);
@@ -374,7 +374,7 @@ async function saveToGitee(target, base64) {
 }
 
 async function upload({event, body}) {
-    const user = await getCurrentWxUser(event);
+    const user = await getCurrentUser(event);
     const extension = getImageExtension(body);
     const image = decodeImage(body);
     const target = buildTargetPath(body, user, extension);

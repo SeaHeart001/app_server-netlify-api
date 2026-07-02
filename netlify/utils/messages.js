@@ -1,14 +1,29 @@
 const mongoose = require('mongoose');
-const {WxUser} = require('../../db/wxuser/wxUserModel');
-const {WxMessage} = require('../../db/message/wxMessageModel');
-const {getJwtSecret} = require('../../db/db');
+const {User} = require('../../db/model/userModel');
+const {Message} = require('../../db/model/messageModel');
+const {getJwtSecret} = require('../../db');
 const {getHeader} = require('./index');
-const {findActiveBindingByRelationKey, formatBinding} = require('./wxRelations');
+const {findActiveBindingByRelationKey, formatBinding, sanitizeAccount} = require('./relations');
 
-const BINDING_REQUEST = 'binding_request';
-const BINDING_ACCEPTED = 'binding_accepted';
-const BINDING_DECLINED = 'binding_declined';
-const RELATION_CHANGED = 'relation_changed';
+const MESSAGE_TYPES = {
+    BINDING_REQUEST: 'binding_request',
+    BINDING_ACCEPTED: 'binding_accepted',
+    BINDING_DECLINED: 'binding_declined',
+    RELATION_CHANGED: 'relation_changed'
+};
+
+const ACTION_STATES = {
+    PENDING: 'pending',
+    ACCEPTED: 'accepted',
+    DECLINED: 'declined',
+    EXPIRED: 'expired',
+    NONE: 'none'
+};
+
+const DELIVERY_STATES = {
+    PENDING: 'pending',
+    DELIVERED: 'delivered'
+};
 
 function getSseEndpoint(event) {
     if (process.env.SSE_EDGE_URL) {
@@ -30,18 +45,18 @@ function getSseEndpoint(event) {
 }
 
 async function markMessageDelivered(messageId) {
-    if (!messageId || !mongoose.Types.ObjectId.isValid(String(messageId)) || !WxMessage || !WxMessage.updateOne) {
+    if (!messageId || !mongoose.Types.ObjectId.isValid(String(messageId)) || !Message || !Message.updateOne) {
         return;
     }
 
-    await WxMessage.updateOne(
+    await Message.updateOne(
         {
             _id: messageId,
-            deliveryState: {$ne: 'delivered'}
+            deliveryState: {$ne: DELIVERY_STATES.DELIVERED}
         },
         {
             $set: {
-                deliveryState: 'delivered',
+                deliveryState: DELIVERY_STATES.DELIVERED,
                 deliveredAt: new Date(),
                 updatedAt: new Date()
             }
@@ -52,8 +67,8 @@ async function markMessageDelivered(messageId) {
 function getPendingBindingQuery(extra = {}) {
     return {
         ...extra,
-        type: BINDING_REQUEST,
-        actionState: 'pending'
+        type: MESSAGE_TYPES.BINDING_REQUEST,
+        actionState: ACTION_STATES.PENDING
     };
 }
 
@@ -66,17 +81,17 @@ function getUnreadMessageQuery(userId) {
 
 async function expireRelatedBindingRequests(messageId, userIds) {
     const now = new Date();
-    await WxMessage.updateMany(
+    await Message.updateMany(
         {
             _id: {$ne: messageId},
-            type: BINDING_REQUEST,
-            actionState: 'pending',
+            type: MESSAGE_TYPES.BINDING_REQUEST,
+            actionState: ACTION_STATES.PENDING,
             $or: [
                 {fromUser: {$in: userIds}},
                 {toUser: {$in: userIds}}
             ]
         },
-        {$set: {actionState: 'expired', handledAt: now, updatedAt: now}}
+        {$set: {actionState: ACTION_STATES.EXPIRED, handledAt: now, updatedAt: now}}
     );
 }
 
@@ -87,46 +102,39 @@ async function formatMessageEvent(message, currentUserId, options = {}) {
 
     const doc = typeof message.toObject === 'function' ? message.toObject() : message;
     const userIds = [doc.fromUser, doc.toUser].filter(Boolean).map(String);
-    const users = await WxUser.find({_id: {$in: userIds}}).lean();
+    const users = await User.find({_id: {$in: userIds}}).lean();
     const fromUser = users.find(user => String(user._id) === String(doc.fromUser));
     const toUser = users.find(user => String(user._id) === String(doc.toUser));
     const relation = options.relation !== undefined
         ? options.relation
-        : doc.relationKey && (doc.type === BINDING_ACCEPTED || doc.type === RELATION_CHANGED)
+        : doc.relationKey && (
+            doc.type === MESSAGE_TYPES.BINDING_ACCEPTED ||
+            doc.type === MESSAGE_TYPES.RELATION_CHANGED
+        )
             ? await formatBinding(await findActiveBindingByRelationKey(doc.relationKey), currentUserId)
             : null;
 
     return {
         id: String(doc._id),
         type: doc.type,
-        actionState: doc.actionState || 'none',
-        deliveryState: doc.deliveryState || 'pending',
+        actionState: doc.actionState || ACTION_STATES.NONE,
+        deliveryState: doc.deliveryState || DELIVERY_STATES.PENDING,
         readAt: doc.readAt || null,
         handledAt: doc.handledAt || null,
         title: doc.title,
         content: doc.content,
         relationKey: doc.relationKey || '',
-        from: fromUser ? {
-            id: String(fromUser._id),
-            openid: fromUser.openid || '',
-            nickname: fromUser.nickname || '',
-            avatarUrl: fromUser.avatarUrl || '',
-            updatedAt: fromUser.updatedAt || ''
-        } : {
+        from: fromUser ? sanitizeAccount(fromUser) : {
             id: '',
+            account: '',
             openid: '',
             nickname: '',
             avatarUrl: '',
             updatedAt: ''
         },
-        to: toUser ? {
-            id: String(toUser._id),
-            openid: toUser.openid || '',
-            nickname: toUser.nickname || '',
-            avatarUrl: toUser.avatarUrl || '',
-            updatedAt: toUser.updatedAt || ''
-        } : {
+        to: toUser ? sanitizeAccount(toUser) : {
             id: '',
+            account: '',
             openid: '',
             nickname: '',
             avatarUrl: '',
@@ -184,10 +192,9 @@ async function publishRealtimeEvent(realtimeEvent, userIds, event) {
 }
 
 module.exports = {
-    BINDING_ACCEPTED,
-    BINDING_DECLINED,
-    BINDING_REQUEST,
-    RELATION_CHANGED,
+    ACTION_STATES,
+    DELIVERY_STATES,
+    MESSAGE_TYPES,
     expireRelatedBindingRequests,
     formatMessageEvent,
     getPendingBindingQuery,

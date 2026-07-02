@@ -1,6 +1,8 @@
 # app-server-netlify-api
 
-基于 Netlify Functions + MongoDB 的小程序后端。
+基于 Netlify Functions + MongoDB 的通用前端后端服务。
+
+这版接口、模型和工具文件使用通用命名。用户体系同时支持小程序 `code` 登录和网页账号密码注册登录，两种登录来源复用同一个 `users` 模型、同一套关系/消息/文件接口。
 
 ## 环境变量
 
@@ -8,8 +10,8 @@
 
 - `MONGODB_URI`：MongoDB 连接串
 - `JWT_SECRET`：JWT 签名密钥
-- `WX_APP_ID`：微信小程序 AppID
-- `WX_APP_SECRET`：微信小程序 AppSecret，只放在后端
+- `WX_APP_ID`：小程序 AppID
+- `WX_APP_SECRET`：小程序 AppSecret，只放在后端
 - `GITEE_ACCESS_TOKEN`：Gitee 图床上传令牌
 - `SSE_PUBLISH_SECRET`：SSE 发布校验密钥，不配置时回退到 `JWT_SECRET`
 - `SSE_EDGE_URL`：SSE 地址覆盖项
@@ -35,41 +37,46 @@ npx netlify env:import .env
 
 ## 运行结构
 
-- `netlify/functions/wxusers.js`：登录、资料回填、账号搜索、关系查询
+- `netlify/functions/users.js`：注册、登录、资料更新、账号搜索、关系查询
 - `netlify/functions/relations.js`：关系模块，负责发起绑定请求
 - `netlify/functions/messages.js`：消息模块，负责消息动作和未读消息拉取
 - `netlify/functions/files.js`：图片上传到 Gitee
 - `netlify/edge-functions/sse.js`：SSE 连接和事件发布
+- `netlify/utils/auth.js`：JWT 鉴权和用户脱敏
+- `netlify/utils/relations.js`：关系查询、格式化和创建
+- `netlify/utils/messages.js`：消息格式化、未读查询和 SSE 发布
 
 ## 数据模型
 
-### `db/wxuser/wxUserModel.js`
+### `db/model/userModel.js`
 
-微信用户账号表。
+通用用户账号表，集合名为 `users`。
 
-- `openid`：微信唯一用户标识，必填且唯一
+- `account`：网页端登录账号，唯一、小写存储；小程序用户可以为空
+- `passwordHash`：网页端密码哈希，只给后端使用，不会返回前端；小程序用户可以为空
+- `openid`：小程序用户唯一标识；网页账号可以为空
 - `unionid`：可选的统一用户标识
-- `sessionKey`：登录会话密钥，只给后端使用
+- `loginSource`：最近一次登录来源，例如 `password`、`mini_program`
 - `nickname`：展示昵称
 - `avatarUrl`：头像地址
 - `gender`：`0` 未知，`1` 男，`2` 女
 - `city`、`province`、`country`：地区信息
-- `profileSource`：资料来源，例如 `manual`、`wx` 等
+- `profileSource`：资料来源，例如 `manual`
 - `lastLoginAt`：最后一次登录时间
 - `createdAt`、`updatedAt`：时间戳
 
-### `db/wxuser/wxUserBindingModel.js`
+### `db/model/relationModel.js`
 
-两个微信用户之间的绑定关系表。
+两个用户之间的绑定关系表，集合名为 `userbindings`。
 
 - `members`：恰好两个 ObjectId，表示绑定双方
 - `relationKey`：稳定排序后的关系键，由 `createRelationKey(userA, userB)` 生成
 - `status`：`active` 或 `inactive`
 - `createdAt`、`updatedAt`：时间戳
 
-### `db/message/wxMessageModel.js`
+### `db/model/messageModel.js`
 
-消息/事件表。现在主要用于绑定请求、绑定同意/拒绝通知，以及后续扩展的其他消息类型。
+消息/事件表，集合名为 `messages`。现在主要用于绑定请求、绑定同意/拒绝通知，以及后续扩展的其他消息类型。
 
 - `type`：消息类型，例如 `binding_request`、`binding_accepted`、`binding_declined`、`relation_changed`
 - `fromUser`：发送方用户 ID
@@ -105,37 +112,84 @@ npx netlify env:import .env
 
 ## 接口说明
 
-### `wxusers`
+所有 Netlify Function 请求路径都带 `/.netlify/functions` 前缀。下面为了阅读只写业务路径。
 
-#### `POST /wxusers/login`
+### `users`
 
-微信登录接口，使用小程序 `code` 换取后台登录态。
+#### `POST /users/register`
+
+注册网页端普通账号，并返回登录态。小程序用户不需要调用注册接口，直接调用 `/users/login` 传 `code` 即可。
 
 请求体：
 
 ```json
-{ "code": "wx-login-code" }
+{
+  "account": "demo",
+  "password": "123456",
+  "nickname": "演示账号",
+  "avatarUrl": ""
+}
 ```
 
 返回示例：
 
 ```json
-{ "token": "...", "user": {} }
+{
+  "token": "...",
+  "user": {
+    "_id": "...",
+    "account": "demo",
+    "nickname": "演示账号",
+    "avatarUrl": ""
+  }
+}
 ```
 
-处理流程：
+字段规则：
 
-1. 调用微信 `jscode2session`
-2. 按 `openid` 新增或更新用户
-3. 返回 JWT token 和脱敏后的用户信息
+- `account` 至少 3 个字符，会统一转成小写
+- `password` 至少 6 个字符
+- 可同时传入 `nickname`、`avatarUrl`、`gender`、`city`、`province`、`country`、`profileSource`
 
-#### `POST /wxusers/me`
+#### `POST /users/login`
+
+统一登录接口。传 `account/password` 时走网页账号密码登录，传 `code` 时走小程序登录。
+
+网页登录请求体：
+
+```json
+{
+  "account": "demo",
+  "password": "123456"
+}
+```
+
+小程序登录请求体：
+
+```json
+{ "code": "login-code" }
+```
+
+网页登录会按 `account` 查询用户并校验 `passwordHash`。
+
+小程序登录会调用 `jscode2session`，按 `openid` 新增或更新同一个 `users` 集合里的用户。
+
+返回示例：
+
+```json
+{
+  "token": "...",
+  "user": {}
+}
+```
+
+#### `POST /users/me`
 
 根据 token 获取当前登录用户信息。
 
-#### `POST /wxusers/profile`
+#### `POST /users/profile`
 
-更新本地用户资料。
+更新当前用户资料。
 
 请求字段：
 
@@ -147,11 +201,9 @@ npx netlify env:import .env
 - `country`：国家
 - `profileSource`：资料来源
 
-这个接口通常用于微信授权后把昵称、头像和地区信息回填到数据库里。
+#### `POST /users/accounts`
 
-#### `POST /wxusers/accounts`
-
-搜索可用于绑定的微信账号。
+搜索可用于绑定的账号。
 
 请求体：
 
@@ -165,7 +217,13 @@ npx netlify env:import .env
 { "accounts": [] }
 ```
 
-#### `POST /wxusers/relation`
+搜索范围：
+
+- `nickname`
+- `account`
+- `openid`
+
+#### `POST /users/relation`
 
 查询当前用户是否已有生效关系。
 
@@ -199,7 +257,7 @@ npx netlify env:import .env
 返回示例：
 
 ```json
-{ "request": {}, "message": "..." }
+{ "request": {}, "message": "已发送绑定申请，等待对方确认" }
 ```
 
 ### `messages`
@@ -342,67 +400,108 @@ Authorization: Bearer <token>
 
 - `url` 用于页面预览
 - `rawUrl` 是否能匿名访问，取决于 Gitee 仓库是否允许公开读取
-- 这个接口不仅给微信头像用，也可以给封面、附件等图片资源用
+- 这个接口可以给头像、封面、附件等图片资源使用
 
-## 小程序侧用法
+## 前端侧用法
 
 ### 通用请求
 
-`app.request({ url, data, loadingTitle })` 会自动补上 `/.netlify/functions` 前缀。
+普通前端调用时需要把业务路径拼到 Netlify Function 前缀后：
+
+```js
+const baseUrl = "https://your-site.netlify.app/.netlify/functions";
+
+async function request(path, data, token) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify(data || {})
+  });
+
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.message || "请求失败");
+  }
+  return result;
+}
+```
 
 示例：
 
 ```js
-app.request({ url: "/wxusers/relation" })
-app.request({ url: "/relations/bind-request", data: { userId } })
-app.request({ url: "/messages/action", data: { messageId, action: "accept" } })
+await request("/users/register", { account: "demo", password: "123456" });
+await request("/users/login", { account: "demo", password: "123456" });
+await request("/users/relation", {}, token);
+await request("/relations/bind-request", { userId }, token);
+await request("/messages/action", { messageId, action: "accept" }, token);
 ```
 
-### 登录
+小程序登录示例：
 
-`app.ensureLogin()` 会先调用 `wx.login` 拿 `code`，再请求 `/wxusers/login`，最后把 token 和用户资料保存起来。
+```js
+wx.login({
+  success(res) {
+    request("/users/login", { code: res.code });
+  }
+});
+```
+
+### 登录态
+
+注册或登录成功后，前端需要保存 `token`。不管是网页账号密码登录还是小程序 `code` 登录，后续需要登录态的接口都放到请求头：
+
+```http
+Authorization: Bearer <token>
+```
 
 ### 资料回填
 
-小程序拿到头像、昵称、地区后，可以调用 `/wxusers/profile` 回填数据库。
+前端拿到头像、昵称、地区后，可以调用 `/users/profile` 回填数据库。
 
 如果头像是先上传到 Gitee，再回写数据库，也还是走这个接口。
 
 ### 关系页
 
-`pages/index/index.js` 主要用到：
+关系页主要用到：
 
-- `/wxusers/relation`：加载当前关系
-- `/wxusers/accounts`：搜索可绑定账号
+- `/users/relation`：加载当前关系
+- `/users/accounts`：搜索可绑定账号
 - `/relations/bind-request`：发起绑定请求
 
 ### 消息处理
 
-`app.js` 负责维护 SSE 连接。
+前端可以建立 SSE 连接：
 
-连接成功或者登录完成后，会调用 `/messages/events` 拉取一次未处理消息，避免前台断开后漏消息。
+```js
+const source = new EventSource(`${edgeBaseUrl}/.netlify/edge-functions/sse?token=${encodeURIComponent(token)}`);
 
-`components/custom-nav/custom-nav.js` 作为全局消息入口，统一处理：
+source.addEventListener("message", event => {
+  const data = JSON.parse(event.data);
+  console.log(data);
+});
+```
 
-- 绑定请求弹窗
-- 绑定同意弹窗
-- 绑定拒绝提示
-
-这个组件挂在多个页面上，所以消息处理不只发生在首页。
+连接成功或者登录完成后，建议再调用一次 `/messages/events` 拉取未处理消息，避免前台断开后漏消息。
 
 ### 图片上传
 
-如果前端需要上传图片，可以调用：
+前端把图片转成 base64 后，请求 `/files/upload`：
 
 ```js
-app.uploadFile({
-  filePath,
-  name,
+await request("/files/upload", {
+  fileName: "avatar.jpg",
+  contentType: "image/jpeg",
+  base64,
+  directory: "profiles",
+  name: "avatar",
   nameMode: "overwrite"
-})
+}, token);
 ```
 
-对应后端会请求 `/files/upload`，其中：
+其中：
 
 - `overwrite` 适合头像这种只保留最新图的场景
 - `timestamp` 适合保留历史版本的场景
