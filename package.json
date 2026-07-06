@@ -3,12 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "check": "node --check db/index.js && node --check db/model/userModel.js && node --check db/model/relationModel.js && node --check db/model/messageModel.js && node --check netlify/utils/index.js && node --check netlify/utils/auth.js && node --check netlify/utils/relations.js && node --check netlify/utils/messages.js && node --check netlify/utils/messageHandlers/messageActions.js && node --check netlify/utils/messageHandlers/relationHandler.js && node --check netlify/functions/users.js && node --check netlify/functions/relations.js && node --check netlify/functions/messages.js && node --check netlify/functions/files.js && node --check netlify/edge-functions/sse.js",
-    "dev": "npx --yes netlify-cli dev"
+    "check": "node --check db/index.js && node --check db/model/userModel.js && node --check db/model/relationModel.js && node --check db/model/messageModel.js && node --check services/users.js && node --check services/relations.js && node --check services/messages.js && node --check services/files.js && node --check routers/utils.js && node --check routers/users.js && node --check routers/relations.js && node --check routers/messages.js && node --check routers/files.js && node --check routers/sse.js && node --check routers/index.js && node --check app.js && node --check server.js && node --check netlify/utils/index.js && node --check netlify/utils/auth.js && node --check netlify/utils/relations.js && node --check netlify/utils/messages.js && node --check netlify/utils/messageHandlers/messageActions.js && node --check netlify/utils/messageHandlers/relationHandler.js && node --check netlify/functions/users.js && node --check netlify/functions/relations.js && node --check netlify/functions/messages.js && node --check netlify/functions/files.js && node --check netlify/edge-functions/sse.js",
+    "start": "node server.js",
+    "dev": "npx --yes netlify-cli dev",
+    "dev:express": "node server.js",
+    "dev:netlify": "npx --yes netlify-cli dev"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.7",
+    "express": "^4.18.3",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^5.13.23"
   },

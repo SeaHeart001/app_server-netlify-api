@@ -37,6 +37,10 @@ npx netlify env:import .env
 
 ## 运行结构
 
+- `services/*.js`：接口业务代码，Netlify Functions 和 Express Routers 共用
+- `routers/*.js`：Express 路由入口，路径兼容 Netlify Functions
+- `app.js`：Express 应用配置
+- `server.js`：Express 本地/服务器启动入口
 - `netlify/functions/users.js`：注册、登录、资料更新、账号搜索、关系查询
 - `netlify/functions/relations.js`：关系模块，负责发起绑定请求
 - `netlify/functions/messages.js`：消息模块，负责消息动作和未读消息拉取
@@ -113,6 +117,13 @@ npx netlify env:import .env
 ## 接口说明
 
 所有 Netlify Function 请求路径都带 `/.netlify/functions` 前缀。下面为了阅读只写业务路径。
+
+Express 版本同时支持两种路径：
+
+- 兼容路径：`/.netlify/functions/users/login`、`/.netlify/functions/messages/action` 等
+- 短路径：`/users/login`、`/messages/action` 等
+
+如果前端原来拼的是 Netlify 路径，切到 Express 时只需要把 `baseUrl` 改成 Express 服务域名，接口后缀不用改。SSE 也保留 `/.netlify/edge-functions/sse`。
 
 ### `users`
 
@@ -521,6 +532,14 @@ npm install
 ```bash
 npm run dev
 ```
+
+启动 Express：
+
+```bash
+npm run dev:express
+```
+
+`npm run dev` 仍然启动 Netlify 本地开发服务；`npm run dev:express` 启动原始 Express 服务，默认端口是 `3000`，可以通过 `PORT` 环境变量修改。
 
 语法检查：
 
