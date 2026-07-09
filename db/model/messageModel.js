@@ -42,10 +42,28 @@ const MessageSchema = new mongoose.Schema({
         default: 'none',
         index: true
     },
+    notifyChannels: {
+        type: [String],
+        default: function () {
+            return [];
+        }
+    },
     deliveryState: {
         type: String,
         default: 'pending',
         index: true
+    },
+    subscribeState: {
+        type: String,
+        default: 'none',
+        index: true
+    },
+    subscribeSentAt: {
+        type: Date
+    },
+    subscribeError: {
+        type: String,
+        default: ''
     },
     deliveredAt: {
         type: Date

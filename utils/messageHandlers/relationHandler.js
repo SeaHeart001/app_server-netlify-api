@@ -5,8 +5,9 @@ const {
     ACTION_STATES,
     DELIVERY_STATES,
     MESSAGE_TYPES,
+    NOTIFY_CHANNELS,
     expireRelatedBindingRequests,
-    formatMessageEvent,
+    notifyMessageEvent,
     publishRealtimeEvent
 } = require('../messages');
 const {
@@ -38,6 +39,7 @@ async function handleRelationBindAccepted({event, message, user}) {
             relationKey: binding.relationKey
         },
         actionState: ACTION_STATES.NONE,
+        notifyChannels: [NOTIFY_CHANNELS.REALTIME, NOTIFY_CHANNELS.SUBSCRIBE],
         deliveryState: DELIVERY_STATES.PENDING,
         createdAt: now,
         updatedAt: now
@@ -45,9 +47,8 @@ async function handleRelationBindAccepted({event, message, user}) {
 
     const accepterRelation = await formatBinding(binding, getUserId(user));
     const requesterRelation = await formatBinding(binding, getUserId(requester));
-    const requesterEvent = await formatMessageEvent(notice, getUserId(requester), {relation: requesterRelation});
+    await notifyMessageEvent(notice, getUserId(requester), [getUserId(requester)], event, {relation: requesterRelation});
 
-    await publishRealtimeEvent(requesterEvent, [getUserId(requester)], event);
     await publishRealtimeEvent({
         id: `${MESSAGE_TYPES.RELATION_CHANGED}:${binding.relationKey}:${Date.now()}`,
         type: MESSAGE_TYPES.RELATION_CHANGED,
@@ -79,12 +80,13 @@ async function handleRelationBindDeclined({event, message, user}) {
                 relationKey: message.relationKey
             },
             actionState: ACTION_STATES.NONE,
+            notifyChannels: [NOTIFY_CHANNELS.REALTIME, NOTIFY_CHANNELS.SUBSCRIBE],
             deliveryState: DELIVERY_STATES.PENDING,
             createdAt: now,
             updatedAt: now
         });
 
-        await publishRealtimeEvent(await formatMessageEvent(notice, getUserId(requester)), [getUserId(requester)], event);
+        await notifyMessageEvent(notice, getUserId(requester), [getUserId(requester)], event);
     }
 
     return {

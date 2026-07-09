@@ -7,8 +7,8 @@ const {
     ACTION_STATES,
     DELIVERY_STATES,
     MESSAGE_TYPES,
-    formatMessageEvent,
-    publishRealtimeEvent
+    NOTIFY_CHANNELS,
+    notifyMessageEvent
 } = require('../utils/messages');
 const {ACTION_KINDS} = require('../utils/messageHandlers/messageActions');
 const {
@@ -62,13 +62,13 @@ async function bindRequest({event, body}) {
             relationKey
         },
         actionState: ACTION_STATES.PENDING,
+        notifyChannels: [NOTIFY_CHANNELS.REALTIME, NOTIFY_CHANNELS.SUBSCRIBE],
         deliveryState: DELIVERY_STATES.PENDING,
         createdAt: now,
         updatedAt: now
     });
 
-    const realtimeEvent = await formatMessageEvent(requestMessage, getUserId(selectedUser));
-    await publishRealtimeEvent(realtimeEvent, [getUserId(selectedUser)], event);
+    const realtimeEvent = await notifyMessageEvent(requestMessage, getUserId(selectedUser), [getUserId(selectedUser)], event);
 
     return {
         request: realtimeEvent,

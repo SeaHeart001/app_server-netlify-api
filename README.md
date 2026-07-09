@@ -60,6 +60,7 @@ npx netlify env:import .env
 - `utils/express.js`：Express 请求适配、响应适配和 service router 创建
 - `utils/relations.js`：关系查询、格式化和创建
 - `utils/messages.js`：消息格式化、未读查询和 SSE 发布
+- `utils/subscribeMessages.js`：小程序订阅消息 access_token 缓存、发送和状态回写
 
 ### 调用链
 
@@ -173,8 +174,12 @@ Express: GET /sse
 - `content`：消息正文
 - `payload`：可扩展业务数据
 - `actionState`：消息处理状态
+- `notifyChannels`：消息通知渠道，例如 `realtime`、`subscribe`
 - `deliveryState`：SSE 投递状态
 - `deliveredAt`：SSE 成功投递时间
+- `subscribeState`：小程序订阅消息发送状态
+- `subscribeSentAt`：小程序订阅消息发送成功时间
+- `subscribeError`：小程序订阅消息失败或跳过原因
 - `readAt`：客户端确认/已读时间
 - `handledAt`：绑定请求被同意或拒绝的时间
 - `createdAt`、`updatedAt`：时间戳
@@ -192,10 +197,24 @@ Express: GET /sse
 - `pending`：待投递
 - `delivered`：已投递
 
+`notifyChannels` 的含义：
+
+- `realtime`：通过 SSE 实时推送
+- `subscribe`：通过小程序订阅消息发送微信服务通知
+
+`subscribeState` 的含义：
+
+- `none`：未配置订阅消息发送
+- `pending`：准备发送或正在发送
+- `sent`：发送成功
+- `skipped`：因缺少模板、openid 等条件跳过
+- `failed`：微信接口返回失败或发送异常
+
 补充说明：
 
 - 当前前端判断“未处理/未读”主要看 `readAt` 是否为空
 - `deliveryState` 只表示消息是否已经送达到前台连接，不等于用户已经处理
+- 小程序订阅消息是旁路通知，失败不会影响主业务流程
 
 ## 接口说明
 
@@ -434,16 +453,44 @@ Express: GET /sse
 
 - `relation.bind`：绑定关系申请
 
+### 小程序订阅消息策略
+
+当前不判断用户在线/离线，只要消息声明了 `notifyChannels` 包含 `subscribe`，后端就会在写库和 SSE 推送后尝试发送一条小程序订阅消息。
+
+目前开启 `subscribe` 的消息：
+
+- `binding_request`：双向确认消息，需要对方同意或拒绝
+- `binding_accepted`：单向通知，告诉申请方绑定成功
+- `binding_declined`：单向通知，告诉申请方绑定被拒绝
+
+目前不推订阅消息的事件：
+
+- `relation_changed`：只用于前台刷新关系状态，不发送微信服务通知
+- 其他未显式写入 `notifyChannels: ["subscribe"]` 的消息
+
+订阅消息当前使用模板字段：
+
+```json
+{
+  "thing1": "通知类型，对应消息标题",
+  "thing3": "消息来自，对应发送方昵称/账号/openid",
+  "thing5": "备注，对应消息内容"
+}
+```
+
+微信模板需要和这些字段匹配。订阅消息模板 ID、跳转页面和小程序版本目前写在 `utils/subscribeMessages.js` 顶部常量中。用户必须在小程序前端通过 `wx.requestSubscribeMessage` 订阅过对应模板，否则微信接口可能返回拒收或未授权错误，后端会把结果写入 `subscribeState/subscribeError`，但不会中断业务。
+
 ### 新增双向确认业务
 
 如果后续新增一个“需要对方同意/拒绝”的业务，建议沿用现有消息动作机制：
 
 1. 创建一条 `messages` 记录
 2. `actionState` 写 `pending`
-3. `payload.actionKind` 写新的业务动作，例如 `task.confirm`
-4. 在 `utils/messageHandlers` 下新增业务 handler
-5. 在 `messageActions.js` 的 `ACCEPT_HANDLERS` / `DECLINE_HANDLERS` 注册
-6. 前端仍调用 `/messages/action`，传 `messageId` 和 `action`
+3. 如果需要微信服务通知，`notifyChannels` 写入 `["realtime", "subscribe"]`
+4. `payload.actionKind` 写新的业务动作，例如 `task.confirm`
+5. 在 `utils/messageHandlers` 下新增业务 handler
+6. 在 `messageActions.js` 的 `ACCEPT_HANDLERS` / `DECLINE_HANDLERS` 注册
+7. 前端仍调用 `/messages/action`，传 `messageId` 和 `action`
 
 这样前端不需要为每种双向确认业务新增一个接口，只需要根据消息展示弹窗，再把同意/拒绝结果交给 `/messages/action`。
 

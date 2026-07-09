@@ -4,6 +4,7 @@ const {Message} = require('../db/model/messageModel');
 const {getJwtSecret} = require('../db');
 const {getHeader} = require('./index');
 const {findActiveBindingByRelationKey, formatBinding, sanitizeAccount} = require('./relations');
+const {sendMiniProgramSubscribeMessage} = require('./subscribeMessages');
 
 const MESSAGE_TYPES = {
     BINDING_REQUEST: 'binding_request',
@@ -23,6 +24,11 @@ const ACTION_STATES = {
 const DELIVERY_STATES = {
     PENDING: 'pending',
     DELIVERED: 'delivered'
+};
+
+const NOTIFY_CHANNELS = {
+    REALTIME: 'realtime',
+    SUBSCRIBE: 'subscribe'
 };
 
 function getSseEndpoint(event) {
@@ -119,6 +125,10 @@ async function formatMessageEvent(message, currentUserId, options = {}) {
         type: doc.type,
         actionState: doc.actionState || ACTION_STATES.NONE,
         deliveryState: doc.deliveryState || DELIVERY_STATES.PENDING,
+        notifyChannels: doc.notifyChannels || [],
+        subscribeState: doc.subscribeState || 'none',
+        subscribeSentAt: doc.subscribeSentAt || null,
+        subscribeError: doc.subscribeError || '',
         readAt: doc.readAt || null,
         handledAt: doc.handledAt || null,
         title: doc.title,
@@ -152,7 +162,7 @@ async function publishRealtimeEvent(realtimeEvent, userIds, event) {
     const endpoint = getSseEndpoint(event);
 
     if (!targets.length || !endpoint) {
-        return;
+        return {ok: false, delivered: 0, skipped: true};
     }
 
     try {
@@ -173,7 +183,7 @@ async function publishRealtimeEvent(realtimeEvent, userIds, event) {
                 status: res.status,
                 body: await res.text().catch(() => '')
             });
-            return;
+            return {ok: false, delivered: 0, failed: true, status: res.status};
         }
 
         const data = await res.json().catch(() => ({}));
@@ -186,19 +196,44 @@ async function publishRealtimeEvent(realtimeEvent, userIds, event) {
         if (Number(data.delivered || 0) > 0 && realtimeEvent && realtimeEvent.id) {
             await markMessageDelivered(realtimeEvent.id);
         }
+
+        return {
+            ok: true,
+            delivered: Number(data.delivered || 0),
+            endpoint
+        };
     } catch (err) {
         console.warn('SSE publish failed', err && err.message ? err.message : err);
+        return {ok: false, delivered: 0, failed: true, error: err && err.message ? err.message : String(err)};
     }
+}
+
+async function notifyMessageEvent(message, currentUserId, userIds, event, formatOptions = {}) {
+    const realtimeEvent = await formatMessageEvent(message, currentUserId, formatOptions);
+    await publishRealtimeEvent(realtimeEvent, userIds, event);
+
+    try {
+        await sendMiniProgramSubscribeMessage({
+            message,
+            messageEvent: realtimeEvent
+        });
+    } catch (err) {
+        console.warn('Mini program subscribe notification failed', err && err.message ? err.message : err);
+    }
+
+    return realtimeEvent;
 }
 
 module.exports = {
     ACTION_STATES,
     DELIVERY_STATES,
     MESSAGE_TYPES,
+    NOTIFY_CHANNELS,
     expireRelatedBindingRequests,
     formatMessageEvent,
     getPendingBindingQuery,
     getUnreadMessageQuery,
     markMessageDelivered,
+    notifyMessageEvent,
     publishRealtimeEvent
 };
