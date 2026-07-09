@@ -1,5 +1,5 @@
-const {Message} = require('../../../db/model/messageModel');
-const {User} = require('../../../db/model/userModel');
+const {Message} = require('../../db/model/messageModel');
+const {User} = require('../../db/model/userModel');
 const {error} = require('../index');
 const {
     ACTION_STATES,

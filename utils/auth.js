@@ -1,5 +1,5 @@
-const {connect, getJwtSecret} = require('../../db');
-const {User} = require('../../db/model/userModel');
+const {connect, getJwtSecret} = require('../db');
+const {User} = require('../db/model/userModel');
 const jwt = require('jsonwebtoken');
 const {error} = require('./index');
 

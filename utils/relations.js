@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
-const {User} = require('../../db/model/userModel');
-const {Relation} = require('../../db/model/relationModel');
+const {User} = require('../db/model/userModel');
+const {Relation} = require('../db/model/relationModel');
 const {sanitizeUser} = require('./auth');
 
 function getUserId(user) {

@@ -1,15 +1,15 @@
 const mongoose = require('mongoose');
 const {Message} = require('../db/model/messageModel');
-const {error} = require('../netlify/utils');
-const {getCurrentUser} = require('../netlify/utils/auth');
+const {error} = require('../utils');
+const {getCurrentUser} = require('../utils/auth');
 const {
     ACTION_STATES,
     formatMessageEvent,
     getUnreadMessageQuery,
     markMessageDelivered
-} = require('../netlify/utils/messages');
-const {getUserId} = require('../netlify/utils/relations');
-const {runAcceptedBusiness, runDeclinedBusiness} = require('../netlify/utils/messageHandlers/messageActions');
+} = require('../utils/messages');
+const {getUserId} = require('../utils/relations');
+const {runAcceptedBusiness, runDeclinedBusiness} = require('../utils/messageHandlers/messageActions');
 
 const MESSAGE_ACTIONS = {
     ACCEPT: 'accept',

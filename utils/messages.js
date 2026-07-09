@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
-const {User} = require('../../db/model/userModel');
-const {Message} = require('../../db/model/messageModel');
-const {getJwtSecret} = require('../../db');
+const {User} = require('../db/model/userModel');
+const {Message} = require('../db/model/messageModel');
+const {getJwtSecret} = require('../db');
 const {getHeader} = require('./index');
 const {findActiveBindingByRelationKey, formatBinding, sanitizeAccount} = require('./relations');
 

@@ -1,4 +1,4 @@
-const {connect} = require('../../db');
+const {connect} = require('../db');
 
 const headers = {
     'Access-Control-Allow-Origin': process.env.CORS_ORIGIN || '*',

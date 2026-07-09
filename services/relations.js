@@ -1,23 +1,23 @@
 const mongoose = require('mongoose');
 const {User} = require('../db/model/userModel');
 const {Message} = require('../db/model/messageModel');
-const {error} = require('../netlify/utils');
-const {getCurrentUser} = require('../netlify/utils/auth');
+const {error} = require('../utils');
+const {getCurrentUser} = require('../utils/auth');
 const {
     ACTION_STATES,
     DELIVERY_STATES,
     MESSAGE_TYPES,
     formatMessageEvent,
     publishRealtimeEvent
-} = require('../netlify/utils/messages');
-const {ACTION_KINDS} = require('../netlify/utils/messageHandlers/messageActions');
+} = require('../utils/messages');
+const {ACTION_KINDS} = require('../utils/messageHandlers/messageActions');
 const {
     createRelationKey,
     findActiveBindingByRelationKey,
     formatBinding,
     getAccountName,
     getUserId
-} = require('../netlify/utils/relations');
+} = require('../utils/relations');
 
 function assertValidObjectId(value, fieldName) {
     if (!value || !mongoose.Types.ObjectId.isValid(value)) {

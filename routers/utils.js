@@ -1,5 +1,5 @@
 const express = require('express');
-const {headers: defaultHeaders} = require('../netlify/utils');
+const {headers: defaultHeaders} = require('../utils');
 
 function buildEvent(req) {
     return {

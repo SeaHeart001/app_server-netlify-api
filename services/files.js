@@ -1,5 +1,5 @@
-const {error} = require('../netlify/utils');
-const {getCurrentUser} = require('../netlify/utils/auth');
+const {error} = require('../utils');
+const {getCurrentUser} = require('../utils/auth');
 
 const GITEE_OWNER = 'seaheart1027';
 const GITEE_REPO = 'files_block';

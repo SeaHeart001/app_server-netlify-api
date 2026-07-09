@@ -56,16 +56,16 @@ npx netlify env:import .env
 - `netlify/functions/messages.js`：消息模块，负责消息动作和未读消息拉取
 - `netlify/functions/files.js`：图片上传到 Gitee
 - `netlify/edge-functions/sse.js`：SSE 连接和事件发布
-- `netlify/utils/auth.js`：JWT 鉴权和用户脱敏
-- `netlify/utils/relations.js`：关系查询、格式化和创建
-- `netlify/utils/messages.js`：消息格式化、未读查询和 SSE 发布
+- `utils/auth.js`：JWT 鉴权和用户脱敏
+- `utils/relations.js`：关系查询、格式化和创建
+- `utils/messages.js`：消息格式化、未读查询和 SSE 发布
 
 ### 调用链
 
 Netlify 调用链：
 
 ```text
-netlify/functions/*.js -> netlify/utils/createHandler -> services/*.js -> db/model/*.js
+netlify/functions/*.js -> utils/createHandler -> services/*.js -> db/model/*.js
 ```
 
 Express 调用链：
@@ -356,7 +356,7 @@ Express: GET /sse
 
 消息统一动作接口。
 
-这个接口只负责统一鉴权、读取消息、判断动作，并统一把消息写成 `accepted` 或 `declined`。具体业务副作用会按 `payload.actionKind` 分发到 `netlify/utils/messageHandlers/*`。当前绑定关系使用 `actionKind: "relation.bind"`，由 `messageHandlers/relationHandler.js` 处理；后续新增类似“需要对方同意”的业务时，新增一个 handler 并注册到 `messageHandlers/messageActions.js` 即可。
+这个接口只负责统一鉴权、读取消息、判断动作，并统一把消息写成 `accepted` 或 `declined`。具体业务副作用会按 `payload.actionKind` 分发到 `utils/messageHandlers/*`。当前绑定关系使用 `actionKind: "relation.bind"`，由 `messageHandlers/relationHandler.js` 处理；后续新增类似“需要对方同意”的业务时，新增一个 handler 并注册到 `messageHandlers/messageActions.js` 即可。
 
 请求体：
 
@@ -409,7 +409,7 @@ Express: GET /sse
 
 ### 消息枚举
 
-`MESSAGE_TYPES` 定义在 `netlify/utils/messages.js`：
+`MESSAGE_TYPES` 定义在 `utils/messages.js`：
 
 - `binding_request`：绑定申请，需要接收方同意或拒绝
 - `binding_accepted`：绑定申请已同意，发给申请方的通知
@@ -429,7 +429,7 @@ Express: GET /sse
 - `pending`：待投递
 - `delivered`：已经通过 SSE 投递到在线客户端
 
-`ACTION_KINDS` 定义在 `netlify/utils/messageHandlers/messageActions.js`：
+`ACTION_KINDS` 定义在 `utils/messageHandlers/messageActions.js`：
 
 - `relation.bind`：绑定关系申请
 
@@ -440,7 +440,7 @@ Express: GET /sse
 1. 创建一条 `messages` 记录
 2. `actionState` 写 `pending`
 3. `payload.actionKind` 写新的业务动作，例如 `task.confirm`
-4. 在 `netlify/utils/messageHandlers` 下新增业务 handler
+4. 在 `utils/messageHandlers` 下新增业务 handler
 5. 在 `messageActions.js` 的 `ACCEPT_HANDLERS` / `DECLINE_HANDLERS` 注册
 6. 前端仍调用 `/messages/action`，传 `messageId` 和 `action`
 

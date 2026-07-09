@@ -1,14 +1,14 @@
 const bcrypt = require('bcryptjs');
 const {connect} = require('../db');
 const {User} = require('../db/model/userModel');
-const {error} = require('../netlify/utils');
-const {getCurrentUser, sanitizeUser, signUserToken} = require('../netlify/utils/auth');
+const {error} = require('../utils');
+const {getCurrentUser, sanitizeUser, signUserToken} = require('../utils/auth');
 const {
     findActiveBinding,
     formatBinding,
     getUserId,
     sanitizeAccount
-} = require('../netlify/utils/relations');
+} = require('../utils/relations');
 
 const ACCOUNT_MIN_LENGTH = 3;
 const ACCOUNT_MAX_LENGTH = 64;
