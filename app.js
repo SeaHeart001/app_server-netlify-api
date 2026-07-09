@@ -1,7 +1,7 @@
 const path = require('path');
 const express = require('express');
 const {mountRouters} = require('./routers');
-const {applyResponseHeaders, sendError} = require('./routers/utils');
+const {applyResponseHeaders, sendError} = require('./utils/express');
 
 const app = express();
 

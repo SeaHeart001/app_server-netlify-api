@@ -1,5 +1,5 @@
 const express = require('express');
-const {headers: defaultHeaders} = require('../utils');
+const {headers: defaultHeaders} = require('./index');
 
 function buildEvent(req) {
     return {

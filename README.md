@@ -57,6 +57,7 @@ npx netlify env:import .env
 - `netlify/functions/files.js`：图片上传到 Gitee
 - `netlify/edge-functions/sse.js`：SSE 连接和事件发布
 - `utils/auth.js`：JWT 鉴权和用户脱敏
+- `utils/express.js`：Express 请求适配、响应适配和 service router 创建
 - `utils/relations.js`：关系查询、格式化和创建
 - `utils/messages.js`：消息格式化、未读查询和 SSE 发布
 
@@ -71,10 +72,10 @@ netlify/functions/*.js -> utils/createHandler -> services/*.js -> db/model/*.js
 Express 调用链：
 
 ```text
-server.js -> app.js -> routers/*.js -> routers/utils.js -> services/*.js -> db/model/*.js
+server.js -> app.js -> routers/*.js -> utils/express.js -> services/*.js -> db/model/*.js
 ```
 
-Express 的 `routers/utils.js` 会把 `req` 适配成 service 所需的 `{ event, context, body }` 结构，保证业务代码和 Netlify Functions 共用。
+Express 的 `utils/express.js` 会把 `req` 适配成 service 所需的 `{ event, context, body }` 结构，保证业务代码和 Netlify Functions 共用。
 
 SSE 调用链：
 
