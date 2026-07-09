@@ -47,6 +47,7 @@ npx netlify env:import .env
 ## 代码结构
 
 - `services/*.js`：接口业务代码，Netlify Functions 和 Express Routers 共用
+- `realtime/*.mjs`：实时消息共享模块，供 Netlify Edge SSE 和 Express SSE 共用
 - `routers/*.js`：Express 路由入口，只挂载短路径，例如 `/users/login`
 - `app.js`：Express 应用配置
 - `server.js`：Express 本地/服务器启动入口
@@ -74,6 +75,22 @@ server.js -> app.js -> routers/*.js -> routers/utils.js -> services/*.js -> db/m
 ```
 
 Express 的 `routers/utils.js` 会把 `req` 适配成 service 所需的 `{ event, context, body }` 结构，保证业务代码和 Netlify Functions 共用。
+
+SSE 调用链：
+
+```text
+netlify/edge-functions/sse.js -> realtime/*.mjs
+routers/sse.js -> realtime/*.mjs
+```
+
+两套 SSE 入口只保留运行时适配：Netlify Edge 负责 `Request/Response/ReadableStream`，Express 负责 `req/res.write()`。通用逻辑放在 `realtime`：
+
+- `constants.mjs`：心跳间隔、padding、SSE 事件名和响应头
+- `sseCodec.mjs`：SSE 文本编码
+- `auth.mjs`、`jwt.mjs`：token 提取、JWT payload 校验和通用解码工具
+- `channelStore.mjs`：连接分组、增删、按用户投递和消息去重
+- `session.mjs`：连接生命周期、ready 事件、heartbeat 和 cleanup
+- `publisher.mjs`：发布鉴权、参数校验和 delivered 统计
 
 ### 路径规则
 
