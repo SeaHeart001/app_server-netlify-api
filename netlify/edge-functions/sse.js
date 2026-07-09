@@ -1,11 +1,15 @@
+import {
+    addRealtimeClient,
+    createRealtimeClient,
+    getChannelCount,
+    getTotalClientCount,
+    publishToRealtimeClients,
+    removeRealtimeClient
+} from '../../realtime/channelStore.mjs';
+
 const encoder = new TextEncoder();
-const state = globalThis.__sseState || {
-    channels: new Map()
-};
 
-globalThis.__sseState = state;
-
-const HEARTBEAT_INTERVAL = 5000;
+const HEARTBEAT_INTERVAL = 15000;
 const EVENT_PADDING = `:${' '.repeat(2048)}\n\n`;
 
 const corsHeaders = {
@@ -122,51 +126,6 @@ function writeEvent(controller, name, data) {
     controller.enqueue(encoder.encode(`event: ${name}\ndata: ${JSON.stringify(data || {})}\n\n${EVENT_PADDING}`));
 }
 
-function addClient(userId, client) {
-    const key = String(userId);
-    const clients = state.channels.get(key) || new Set();
-    clients.add(client);
-    state.channels.set(key, clients);
-}
-
-function getTotalClientCount() {
-    let count = 0;
-    state.channels.forEach(clients => {
-        count += clients.size;
-    });
-    return count;
-}
-
-function removeClient(userId, client) {
-    const key = String(userId);
-    const clients = state.channels.get(key);
-    if (!clients) {
-        return;
-    }
-
-    clients.delete(client);
-    if (!clients.size) {
-        state.channels.delete(key);
-    }
-}
-
-function sendClientEvent(client, event) {
-    if (!event) {
-        return false;
-    }
-
-    const eventId = event.id ? String(event.id) : '';
-    if (eventId && client.sentIds.has(eventId)) {
-        return false;
-    }
-
-    client.send(event);
-    if (eventId) {
-        client.sentIds.add(eventId);
-    }
-    return true;
-}
-
 async function openStream(request) {
     const token = getToken(request);
     const decoded = await verifyJwt(token);
@@ -175,13 +134,12 @@ async function openStream(request) {
     let cleanup = function () {};
     const body = new ReadableStream({
         start(controller) {
-            const client = {
+            const client = createRealtimeClient({
                 userId,
-                sentIds: new Set(),
                 send(event) {
                     writeEvent(controller, 'message', event);
                 }
-            };
+            });
             let closed = false;
 
             cleanup = function () {
@@ -191,7 +149,7 @@ async function openStream(request) {
 
                 closed = true;
                 clearInterval(heartbeat);
-                removeClient(userId, client);
+                removeRealtimeClient(client);
                 try {
                     controller.close();
                 } catch (err) {
@@ -207,11 +165,11 @@ async function openStream(request) {
                 }
             }, HEARTBEAT_INTERVAL);
 
-            addClient(userId, client);
+            addRealtimeClient(client);
             console.info('SSE client connected', {
                 userId,
                 totalClients: getTotalClientCount(),
-                channels: state.channels.size
+                channels: getChannelCount()
             });
             writeEvent(controller, 'ready', {userId, at: Date.now()});
 
@@ -250,32 +208,16 @@ async function publish(request) {
         return jsonResponse(400, {message: '缺少发布参数'});
     }
 
-    let delivered = 0;
-    userIds.forEach(userId => {
-        const clients = state.channels.get(String(userId));
-        if (!clients) {
-            return;
-        }
-
-        Array.from(clients).forEach(client => {
-            try {
-                if (sendClientEvent(client, event)) {
-                    delivered += 1;
-                }
-            } catch (err) {
-                clients.delete(client);
-            }
-        });
-    });
+    const publishResult = publishToRealtimeClients(userIds, event);
 
     console.info('SSE publish', {
         userIds,
-        delivered,
-        totalClients: getTotalClientCount(),
-        channels: state.channels.size
+        delivered: publishResult.delivered,
+        totalClients: publishResult.totalClients,
+        channels: publishResult.channels
     });
 
-    return jsonResponse(200, {ok: true, delivered});
+    return jsonResponse(200, {ok: true, delivered: publishResult.delivered});
 }
 
 export default async function handler(request) {

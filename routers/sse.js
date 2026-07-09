@@ -2,41 +2,12 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const {getJwtSecret} = require('../db');
 
-const HEARTBEAT_INTERVAL = 5000;
+const HEARTBEAT_INTERVAL = 15000;
 const EVENT_PADDING = `:${' '.repeat(2048)}\n\n`;
+const channelStorePromise = import('../realtime/channelStore.mjs');
 
-const state = global.__sseState || {
-    channels: new Map()
-};
-
-global.__sseState = state;
-
-function getTotalClientCount() {
-    let count = 0;
-    state.channels.forEach(clients => {
-        count += clients.size;
-    });
-    return count;
-}
-
-function addClient(userId, client) {
-    const key = String(userId);
-    const clients = state.channels.get(key) || new Set();
-    clients.add(client);
-    state.channels.set(key, clients);
-}
-
-function removeClient(userId, client) {
-    const key = String(userId);
-    const clients = state.channels.get(key);
-    if (!clients) {
-        return;
-    }
-
-    clients.delete(client);
-    if (!clients.size) {
-        state.channels.delete(key);
-    }
+async function getRealtimeChannelStore() {
+    return channelStorePromise;
 }
 
 function getToken(req) {
@@ -77,24 +48,8 @@ function writeEvent(res, name, data) {
     res.write(`event: ${name}\ndata: ${JSON.stringify(data || {})}\n\n${EVENT_PADDING}`);
 }
 
-function sendClientEvent(client, event) {
-    if (!event) {
-        return false;
-    }
-
-    const eventId = event.id ? String(event.id) : '';
-    if (eventId && client.sentIds.has(eventId)) {
-        return false;
-    }
-
-    client.send(event);
-    if (eventId) {
-        client.sentIds.add(eventId);
-    }
-    return true;
-}
-
-function openStream(req, res) {
+async function openStream(req, res) {
+    const channelStore = await getRealtimeChannelStore();
     const decoded = verifyUserToken(getToken(req));
     const userId = String(decoded.id);
 
@@ -107,13 +62,12 @@ function openStream(req, res) {
         res.flushHeaders();
     }
 
-    const client = {
+    const client = channelStore.createRealtimeClient({
         userId,
-        sentIds: new Set(),
         send(event) {
             writeEvent(res, 'message', event);
         }
-    };
+    });
     let closed = false;
 
     const cleanup = function () {
@@ -123,7 +77,7 @@ function openStream(req, res) {
 
         closed = true;
         clearInterval(heartbeat);
-        removeClient(userId, client);
+        channelStore.removeRealtimeClient(client);
         try {
             res.end();
         } catch (err) {
@@ -139,11 +93,11 @@ function openStream(req, res) {
         }
     }, HEARTBEAT_INTERVAL);
 
-    addClient(userId, client);
+    channelStore.addRealtimeClient(client);
     console.info('SSE client connected', {
         userId,
-        totalClients: getTotalClientCount(),
-        channels: state.channels.size
+        totalClients: channelStore.getTotalClientCount(),
+        channels: channelStore.getChannelCount()
     });
     writeEvent(res, 'ready', {userId, at: Date.now()});
 
@@ -151,7 +105,8 @@ function openStream(req, res) {
     req.on('error', cleanup);
 }
 
-function publish(req, res) {
+async function publish(req, res) {
+    const channelStore = await getRealtimeChannelStore();
     const secret = process.env.SSE_PUBLISH_SECRET || getJwtSecret();
     const providedSecret = req.headers['x-sse-secret'] || '';
 
@@ -169,47 +124,31 @@ function publish(req, res) {
         return;
     }
 
-    let delivered = 0;
-    userIds.forEach(userId => {
-        const clients = state.channels.get(String(userId));
-        if (!clients) {
-            return;
-        }
-
-        Array.from(clients).forEach(client => {
-            try {
-                if (sendClientEvent(client, event)) {
-                    delivered += 1;
-                }
-            } catch (err) {
-                clients.delete(client);
-            }
-        });
-    });
+    const publishResult = channelStore.publishToRealtimeClients(userIds, event);
 
     console.info('SSE publish', {
         userIds,
-        delivered,
-        totalClients: getTotalClientCount(),
-        channels: state.channels.size
+        delivered: publishResult.delivered,
+        totalClients: publishResult.totalClients,
+        channels: publishResult.channels
     });
 
-    res.status(200).json({ok: true, delivered});
+    res.status(200).json({ok: true, delivered: publishResult.delivered});
 }
 
 const router = express.Router();
 
-router.get('/', (req, res, next) => {
+router.get('/', async (req, res, next) => {
     try {
-        openStream(req, res);
+        await openStream(req, res);
     } catch (err) {
         next(err);
     }
 });
 
-router.post('/', (req, res, next) => {
+router.post('/', async (req, res, next) => {
     try {
-        publish(req, res);
+        await publish(req, res);
     } catch (err) {
         next(err);
     }
