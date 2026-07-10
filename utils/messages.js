@@ -10,7 +10,8 @@ const MESSAGE_TYPES = {
     BINDING_REQUEST: 'binding_request',
     BINDING_ACCEPTED: 'binding_accepted',
     BINDING_DECLINED: 'binding_declined',
-    RELATION_CHANGED: 'relation_changed'
+    RELATION_CHANGED: 'relation_changed',
+    RELATION_MESSAGE: 'relation_message'
 };
 
 const ACTION_STATES = {

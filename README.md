@@ -105,6 +105,7 @@ HTTP 业务接口在两种运行方式下使用同一组业务路径：
 - `/users/accounts`
 - `/users/relation`
 - `/relations/bind-request`
+- `/relations/message`
 - `/messages/action`
 - `/messages/events`
 - `/files/upload`
@@ -370,6 +371,36 @@ Express: GET /sse
 { "request": {}, "message": "已发送绑定申请，等待对方确认" }
 ```
 
+#### `POST /relations/message`
+
+关系内单向消息接口。当前用户必须已经有 active 绑定关系，后端会自动找到绑定的另一个用户并发送消息。
+
+请求体：
+
+```json
+{
+  "title": "消息通知",
+  "content": "对方拍了拍你"
+}
+```
+
+字段说明：
+
+- `title`：可选，消息标题；不传时默认 `消息通知`
+- `content`：可选，前端希望对方看到的正文；不传时默认 `对方拍了拍你`
+
+规则：
+
+- 创建一条 `relation_message` 消息，`actionState` 为 `none`
+- `notifyChannels` 同时包含 `realtime` 和 `subscribe`
+- 在线用户通过 SSE 收到弹窗；不在线时后端会尝试发送小程序订阅消息
+
+返回示例：
+
+```json
+{ "message": "已发送", "event": {} }
+```
+
 ### `messages`
 
 #### `POST /messages/action`
@@ -435,6 +466,7 @@ Express: GET /sse
 - `binding_accepted`：绑定申请已同意，发给申请方的通知
 - `binding_declined`：绑定申请已拒绝，发给申请方的通知
 - `relation_changed`：关系已变更的实时事件，不一定落库成普通消息
+- `relation_message`：关系内单向消息，无需接收方同意或拒绝
 
 `ACTION_STATES`：
 
@@ -462,6 +494,7 @@ Express: GET /sse
 - `binding_request`：双向确认消息，需要对方同意或拒绝
 - `binding_accepted`：单向通知，告诉申请方绑定成功
 - `binding_declined`：单向通知，告诉申请方绑定被拒绝
+- `relation_message`：关系内单向消息，告诉对方有新的消息
 
 目前不推订阅消息的事件：
 
@@ -708,6 +741,7 @@ Authorization: Bearer <token>
 - `/users/relation`：加载当前关系
 - `/users/accounts`：搜索可绑定账号
 - `/relations/bind-request`：发起绑定请求
+- `/relations/message`：给已绑定的对方发送单向消息，可传 `{ "title": "消息通知", "content": "对方拍了拍你" }`
 
 ### 消息处理
 
