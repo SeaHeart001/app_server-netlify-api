@@ -3,6 +3,7 @@ const {User} = require('../db/model/userModel');
 
 const WECHAT_API_BASE_URL = 'https://api.weixin.qq.com/cgi-bin';
 const ACCESS_TOKEN_REFRESH_OFFSET = 5 * 60 * 1000;
+const ACCESS_TOKEN_INVALID_ERRCODES = new Set([40001, 40014, 42001]);
 const SUBSCRIBE_MESSAGE_TEMPLATE_ID = '_b42cmg1CuItFk1NmjV05t6P4x2zsekt8qvg8qkGWfk';
 const SUBSCRIBE_MESSAGE_PAGE = 'pages/index/index';
 const SUBSCRIBE_MINIPROGRAM_STATE = 'trial';
@@ -113,12 +114,18 @@ async function getMiniProgramAccessToken() {
         throw new Error('服务配置缺少 WX_APP_ID 或 WX_APP_SECRET');
     }
 
-    const params = new URLSearchParams({
-        grant_type: 'client_credential',
-        appid,
-        secret
+    const res = await fetch(`${WECHAT_API_BASE_URL}/stable_token`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json;charset=UTF-8'
+        },
+        body: JSON.stringify({
+            grant_type: 'client_credential',
+            appid,
+            secret,
+            force_refresh: false
+        })
     });
-    const res = await fetch(`${WECHAT_API_BASE_URL}/token?${params.toString()}`);
     const data = await readWechatResponse(res);
 
     if (!res.ok || data.errcode) {
@@ -132,6 +139,35 @@ async function getMiniProgramAccessToken() {
     accessTokenCache.value = data.access_token;
     accessTokenCache.expiresAt = Date.now() + Number(data.expires_in || 7200) * 1000;
     return accessTokenCache.value;
+}
+
+function clearAccessTokenCache() {
+    accessTokenCache.value = '';
+    accessTokenCache.expiresAt = 0;
+}
+
+function isAccessTokenInvalid(data) {
+    return data && ACCESS_TOKEN_INVALID_ERRCODES.has(Number(data.errcode));
+}
+
+async function requestSubscribeSend({accessToken, targetUser, templateId, messageEvent}) {
+    const res = await fetch(`${WECHAT_API_BASE_URL}/message/subscribe/send?access_token=${encodeURIComponent(accessToken)}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json;charset=UTF-8'
+        },
+        body: JSON.stringify({
+            touser: targetUser.openid,
+            template_id: templateId,
+            page: getSubscribePage(messageEvent),
+            data: buildSubscribeData(messageEvent),
+            miniprogram_state: getMiniProgramState(),
+            lang: 'zh_CN'
+        })
+    });
+    const data = await readWechatResponse(res);
+
+    return {res, data};
 }
 
 function shouldSendSubscribeMessage(message) {
@@ -161,22 +197,24 @@ async function sendMiniProgramSubscribeMessage({message, messageEvent}) {
     await updateSubscribeState(messageId, SUBSCRIBE_STATES.PENDING);
 
     try {
-        const accessToken = await getMiniProgramAccessToken();
-        const res = await fetch(`${WECHAT_API_BASE_URL}/message/subscribe/send?access_token=${encodeURIComponent(accessToken)}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json;charset=UTF-8'
-            },
-            body: JSON.stringify({
-                touser: targetUser.openid,
-                template_id: templateId,
-                page: getSubscribePage(messageEvent),
-                data: buildSubscribeData(messageEvent),
-                miniprogram_state: getMiniProgramState(),
-                lang: 'zh_CN'
-            })
+        let accessToken = await getMiniProgramAccessToken();
+        let {res, data} = await requestSubscribeSend({
+            accessToken,
+            targetUser,
+            templateId,
+            messageEvent
         });
-        const data = await readWechatResponse(res);
+
+        if ((!res.ok || data.errcode) && isAccessTokenInvalid(data)) {
+            clearAccessTokenCache();
+            accessToken = await getMiniProgramAccessToken();
+            ({res, data} = await requestSubscribeSend({
+                accessToken,
+                targetUser,
+                templateId,
+                messageEvent
+            }));
+        }
 
         if (!res.ok || data.errcode) {
             const messageText = getWechatErrorMessage(data, '小程序订阅消息发送失败');

@@ -32,6 +32,15 @@ const NOTIFY_CHANNELS = {
     SUBSCRIBE: 'subscribe'
 };
 
+const EVENT_KINDS = {
+    MESSAGE: 'message',
+    SYNC: 'sync'
+};
+
+function isLocalHost(host) {
+    return /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(String(host || ''));
+}
+
 function getSseEndpoint(event) {
     if (process.env.SSE_EDGE_URL) {
         return process.env.SSE_EDGE_URL;
@@ -39,7 +48,7 @@ function getSseEndpoint(event) {
 
     const host = getHeader(event, 'host');
     if (host) {
-        const protocol = getHeader(event, 'x-forwarded-proto') || (host.indexOf('localhost') > -1 ? 'http' : 'https');
+        const protocol = getHeader(event, 'x-forwarded-proto') || (isLocalHost(host) ? 'http' : 'https');
         return `${protocol}://${host}/.netlify/edge-functions/sse`;
     }
 
@@ -124,6 +133,7 @@ async function formatMessageEvent(message, currentUserId, options = {}) {
     return {
         id: String(doc._id),
         type: doc.type,
+        eventKind: EVENT_KINDS.MESSAGE,
         actionState: doc.actionState || ACTION_STATES.NONE,
         deliveryState: doc.deliveryState || DELIVERY_STATES.PENDING,
         notifyChannels: doc.notifyChannels || [],
@@ -204,7 +214,10 @@ async function publishRealtimeEvent(realtimeEvent, userIds, event) {
             endpoint
         };
     } catch (err) {
-        console.warn('SSE publish failed', err && err.message ? err.message : err);
+        console.warn('SSE publish failed', {
+            endpoint,
+            error: err && err.message ? err.message : String(err)
+        });
         return {ok: false, delivered: 0, failed: true, error: err && err.message ? err.message : String(err)};
     }
 }
@@ -228,6 +241,7 @@ async function notifyMessageEvent(message, currentUserId, userIds, event, format
 module.exports = {
     ACTION_STATES,
     DELIVERY_STATES,
+    EVENT_KINDS,
     MESSAGE_TYPES,
     NOTIFY_CHANNELS,
     expireRelatedBindingRequests,

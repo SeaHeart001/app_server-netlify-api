@@ -4,6 +4,7 @@ const {error} = require('../index');
 const {
     ACTION_STATES,
     DELIVERY_STATES,
+    EVENT_KINDS,
     MESSAGE_TYPES,
     NOTIFY_CHANNELS,
     expireRelatedBindingRequests,
@@ -52,6 +53,7 @@ async function handleRelationBindAccepted({event, message, user}) {
     await publishRealtimeEvent({
         id: `${MESSAGE_TYPES.RELATION_CHANGED}:${binding.relationKey}:${Date.now()}`,
         type: MESSAGE_TYPES.RELATION_CHANGED,
+        eventKind: EVENT_KINDS.SYNC,
         title: '关系已更新',
         content: '绑定关系已完成',
         relationKey: binding.relationKey,

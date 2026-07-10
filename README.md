@@ -165,9 +165,9 @@ Express: GET /sse
 
 ### `db/model/messageModel.js`
 
-消息/事件表，集合名为 `messages`。现在主要用于绑定请求、绑定同意/拒绝通知，以及后续扩展的其他消息类型。
+消息/事件表，集合名为 `messages`。现在主要用于绑定请求、绑定同意/拒绝通知、关系内单向通知，以及后续扩展的其他用户消息类型。
 
-- `type`：消息类型，例如 `binding_request`、`binding_accepted`、`binding_declined`、`relation_changed`
+- `type`：消息类型，例如 `binding_request`、`binding_accepted`、`binding_declined`、`relation_message`
 - `fromUser`：发送方用户 ID
 - `toUser`：接收方用户 ID
 - `relationKey`：与关系相关的消息所使用的关系键
@@ -213,6 +213,8 @@ Express: GET /sse
 
 补充说明：
 
+- `eventKind` 是接口/SSE 返回事件上的字段，不是 `messages` 表字段
+- `relation_changed` 这类同步事件通常不落库，只通过 SSE 发布给页面刷新状态
 - 当前前端判断“未处理/未读”主要看 `readAt` 是否为空
 - `deliveryState` 只表示消息是否已经送达到前台连接，不等于用户已经处理
 - 小程序订阅消息是旁路通知，失败不会影响主业务流程
@@ -391,9 +393,10 @@ Express: GET /sse
 
 规则：
 
-- 创建一条 `relation_message` 消息，`actionState` 为 `none`
+- 创建一条 `relation_message` 消息，返回事件 `eventKind` 为 `message`，`actionState` 为 `none`
 - `notifyChannels` 同时包含 `realtime` 和 `subscribe`
 - 在线用户通过 SSE 收到弹窗；不在线时后端会尝试发送小程序订阅消息
+- 如果该业务还需要刷新页面，后端应额外发布一条 `eventKind: "sync"` 的同步事件
 
 返回示例：
 
@@ -438,8 +441,13 @@ Express: GET /sse
 
 - `id`
 - `type`
+- `eventKind`
 - `actionState`
 - `deliveryState`
+- `notifyChannels`
+- `subscribeState`
+- `subscribeSentAt`
+- `subscribeError`
 - `readAt`
 - `handledAt`
 - `title`
@@ -454,11 +462,20 @@ Express: GET /sse
 
 ### `messages` 的判断约定
 
+- `eventKind` 表示前端处理用途：
+  - `message`：用户可见消息，交给公共消息组件弹窗、确认、已读
+  - `sync`：页面同步事件，只给页面刷新状态，不弹窗、不已读
 - 只要 `readAt` 为空，就可以认为这条消息还没有被前端确认
 - 如果你只是想判断“有没有未处理消息”，优先查 `readAt`
 - 如果要判断“是否已经通过 SSE 发到前台”，再看 `deliveryState`
+- `notifyChannels` 只表示通知渠道，不表示页面是否刷新
 
 ### 消息枚举
+
+`EVENT_KINDS` 定义在 `utils/messages.js`：
+
+- `message`：用户消息，来自 `messages` 表格式化结果，前端公共消息组件会处理
+- `sync`：同步事件，通常不落库，页面按 `type` 自行刷新状态
 
 `MESSAGE_TYPES` 定义在 `utils/messages.js`：
 
@@ -513,6 +530,8 @@ Express: GET /sse
 
 微信模板需要和这些字段匹配。订阅消息模板 ID、跳转页面和小程序版本目前写在 `utils/subscribeMessages.js` 顶部常量中。用户必须在小程序前端通过 `wx.requestSubscribeMessage` 订阅过对应模板，否则微信接口可能返回拒收或未授权错误，后端会把结果写入 `subscribeState/subscribeError`，但不会中断业务。
 
+后端通过微信 `stable_token` 接口获取小程序 `access_token` 并做内存缓存。发送订阅消息时如果微信返回 `40001`、`40014`、`42001`，会清理缓存、重新获取 stable token 并重试一次，避免旧 token 或多实例 token 竞争导致的 `access_token is invalid or not latest`。
+
 ### 新增双向确认业务
 
 如果后续新增一个“需要对方同意/拒绝”的业务，建议沿用现有消息动作机制：
@@ -526,6 +545,8 @@ Express: GET /sse
 7. 前端仍调用 `/messages/action`，传 `messageId` 和 `action`
 
 这样前端不需要为每种双向确认业务新增一个接口，只需要根据消息展示弹窗，再把同意/拒绝结果交给 `/messages/action`。
+
+需要只刷新页面、不弹窗时，不创建用户消息，直接发布 `eventKind: "sync"` 的 SSE 事件。需要“弹窗 + 刷新”时，现阶段约定由后端分别发送一条 `eventKind: "message"` 用户消息和一条 `eventKind: "sync"` 页面同步事件。
 
 ### 绑定关系完整流程
 
@@ -548,7 +569,8 @@ Express: GET /sse
 - 创建或激活 `relation`
 - 把其他相关待处理绑定申请置为 `expired`
 - 给发起方创建 `binding_accepted` 通知
-- 给双方发布关系变化实时事件
+- 给同意方发布 `eventKind: "sync"` 的 `relation_changed` 事件
+- 发起方收到 `binding_accepted` 用户消息后也会重新加载关系
 
 拒绝后的后端行为：
 
@@ -589,6 +611,8 @@ query 方式：
 SSE_EDGE_URL=https://your-express-api.example.com/sse
 ```
 
+本地 Netlify 开发时，如果请求 `Host` 是 `localhost`、`127.0.0.1`、`10.*`、`192.168.*` 或 `172.16.*` 到 `172.31.*`，后端会按 `http` 拼接 SSE 发布地址；其他域名默认按 `https`。如果日志出现 `SSE publish failed`，现在会打印实际 `endpoint`，优先检查协议、端口和路径是否可从函数进程访问。
+
 发布的数据结构示例：
 
 ```json
@@ -596,13 +620,16 @@ SSE_EDGE_URL=https://your-express-api.example.com/sse
   "userIds": ["target-user-id"],
   "event": {
     "id": "message-id",
-    "type": "binding_request"
+    "type": "binding_request",
+    "eventKind": "message"
   }
 }
 ```
 
 注意：
 
+- `eventKind: "message"` 代表用户可见消息，前端公共消息组件会弹窗或确认
+- `eventKind: "sync"` 代表页面同步事件，只用于页面刷新状态
 - Express SSE 当前使用进程内存保存连接，只适合单实例部署
 - 如果 Express 后续多实例部署，需要改成 Redis pub/sub 或负载均衡 sticky session
 - Nginx 反代 SSE 时需要关闭响应缓冲，并调大超时时间
@@ -763,6 +790,15 @@ source.addEventListener("message", event => {
 ```
 
 连接成功或者登录完成后，建议再调用一次 `/messages/events` 拉取未处理消息，避免前台断开后漏消息。
+
+当前小程序前端的处理约定：
+
+- `app.js` 负责建立 SSE、解析事件、拉取 `/messages/events`，并把事件分发给监听器
+- `message-host` 只处理 `eventKind === "message"` 的用户消息
+- `actionState === "pending"` 时弹同意/拒绝，并调用 `/messages/action`
+- `actionState === "none"` 时弹普通通知，并调用 `/messages/action` 标记已读
+- 页面组件自己监听 `eventKind === "sync"` 或关心的消息 `type`，例如首页监听 `relation_changed` / `binding_accepted` 后调用 `/users/relation`
+- 前端不再从 `message-host` 本地广播 `relation_changed`，关系刷新依赖后端 SSE 同步事件或页面自身 `onShow`
 
 ### 图片上传
 
