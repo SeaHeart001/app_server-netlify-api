@@ -7,13 +7,15 @@ const realtimePromise = Promise.all([
     import('../realtime/auth.mjs'),
     import('../realtime/sseCodec.mjs'),
     import('../realtime/session.mjs'),
-    import('../realtime/publisher.mjs')
-]).then(([constants, auth, sseCodec, session, publisher]) => ({
+    import('../realtime/publisher.mjs'),
+    import('../realtime/channelStore.mjs')
+]).then(([constants, auth, sseCodec, session, publisher, channelStore]) => ({
     ...constants,
     ...auth,
     ...sseCodec,
     ...session,
-    ...publisher
+    ...publisher,
+    ...channelStore
 }));
 
 async function getRealtime() {
@@ -49,6 +51,10 @@ async function openStream(req, res) {
     });
     const decoded = verifyUserToken(token, realtime);
     const userId = String(decoded.id);
+    const clientId = realtime.getClientIdFromRequestParts({
+        clientId: req.headers['x-sse-client-id'] || '',
+        url: getRequestUrl(req)
+    });
 
     res.status(200);
     setHeaders(res, realtime.SSE_STREAM_HEADERS);
@@ -58,6 +64,7 @@ async function openStream(req, res) {
 
     const cleanup = realtime.openRealtimeSession({
         userId,
+        clientId,
         sendEvent(name, data) {
             res.write(realtime.formatSseEvent(name, data));
         },
@@ -89,6 +96,34 @@ async function publish(req, res) {
     res.status(200).json(result);
 }
 
+async function closeClient(req, res) {
+    const realtime = await getRealtime();
+    const token = realtime.getTokenFromRequestParts({
+        authorization: req.headers.authorization || '',
+        url: getRequestUrl(req)
+    });
+    const decoded = verifyUserToken(token, realtime);
+    const userId = String(decoded.id);
+    const clientId = realtime.getClientIdFromRequestParts({
+        clientId: req.headers['x-sse-client-id'] || '',
+        url: getRequestUrl(req)
+    });
+    const result = realtime.closeRealtimeClients({userId, clientId});
+
+    console.info('SSE client close requested', {
+        userId,
+        clientId,
+        closed: result.closed,
+        totalClients: result.totalClients,
+        channels: result.channels
+    });
+
+    res.status(200).json({
+        ok: true,
+        closed: result.closed
+    });
+}
+
 const router = express.Router();
 
 router.get('/', async (req, res, next) => {
@@ -102,6 +137,14 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
     try {
         await publish(req, res);
+    } catch (err) {
+        next(err);
+    }
+});
+
+router.delete('/', async (req, res, next) => {
+    try {
+        await closeClient(req, res);
     } catch (err) {
         next(err);
     }

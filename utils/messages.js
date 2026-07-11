@@ -224,7 +224,12 @@ async function publishRealtimeEvent(realtimeEvent, userIds, event) {
 
 async function notifyMessageEvent(message, currentUserId, userIds, event, formatOptions = {}) {
     const realtimeEvent = await formatMessageEvent(message, currentUserId, formatOptions);
-    await publishRealtimeEvent(realtimeEvent, userIds, event);
+    const realtimeResult = await publishRealtimeEvent(realtimeEvent, userIds, event);
+    const delivered = Number((realtimeResult && realtimeResult.delivered) || 0);
+
+    if (delivered > 0) {
+        return realtimeEvent;
+    }
 
     try {
         await sendMiniProgramSubscribeMessage({

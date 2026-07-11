@@ -7,9 +7,10 @@ import {
     removeRealtimeClient
 } from './channelStore.mjs';
 
-export function openRealtimeSession({userId, sendEvent, close, logger = console, logLabel = 'SSE client connected'}) {
+export function openRealtimeSession({userId, clientId, sendEvent, close, logger = console, logLabel = 'SSE client connected'}) {
     const client = createRealtimeClient({
         userId,
+        clientId,
         send(event) {
             sendEvent(SSE_EVENTS.MESSAGE, event);
         }
@@ -31,6 +32,8 @@ export function openRealtimeSession({userId, sendEvent, close, logger = console,
         }
     };
 
+    client.close = cleanup;
+
     heartbeat = setInterval(() => {
         try {
             sendEvent(SSE_EVENTS.HEARTBEAT, {at: Date.now()});
@@ -39,10 +42,12 @@ export function openRealtimeSession({userId, sendEvent, close, logger = console,
         }
     }, HEARTBEAT_INTERVAL);
 
-    addRealtimeClient(client);
+    const addResult = addRealtimeClient(client);
     if (logger && typeof logger.info === 'function') {
         logger.info(logLabel, {
             userId: client.userId,
+            clientId: client.clientId,
+            replaced: addResult.replaced || 0,
             totalClients: getTotalClientCount(),
             channels: getChannelCount()
         });

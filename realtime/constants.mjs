@@ -9,8 +9,8 @@ export const SSE_EVENTS = {
 
 export const SSE_CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-sse-secret',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-sse-secret, x-sse-client-id',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS'
 };
 
 export const SSE_STREAM_HEADERS = {

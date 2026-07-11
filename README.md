@@ -537,7 +537,9 @@ Netlify 定时配置在 `netlify.toml`：
 
 ### 小程序订阅消息策略
 
-当前不判断用户在线/离线，只要消息声明了 `notifyChannels` 包含 `subscribe`，后端就会在写库和 SSE 推送后尝试发送一条小程序订阅消息。
+当前不单独维护在线状态。后端会先尝试 SSE 推送，如果本次 SSE 返回 `delivered > 0`，说明已有前台连接收到消息，就跳过小程序订阅消息；如果 `delivered === 0`，再按 `notifyChannels` 是否包含 `subscribe` 尝试发送一条小程序订阅消息。
+
+这个判断是当前项目的最小改动方案，适合单实例或 SSE 发布能命中同一连接存储的场景。Netlify Edge 多实例下连接内存不共享，可能出现用户在线但 `delivered === 0` 的情况，此时仍可能发送订阅消息。
 
 目前开启 `subscribe` 的消息：
 
@@ -618,11 +620,13 @@ Netlify：
 
 - `GET /.netlify/edge-functions/sse`：带鉴权的 SSE 长连接
 - `POST /.netlify/edge-functions/sse`：向已连接客户端发布事件
+- `DELETE /.netlify/edge-functions/sse`：客户端主动关闭当前 `clientId` 对应的 SSE 连接
 
 Express：
 
 - `GET /sse`：带鉴权的 SSE 长连接
 - `POST /sse`：向已连接客户端发布事件
+- `DELETE /sse`：客户端主动关闭当前 `clientId` 对应的 SSE 连接
 
 客户端建立连接时需要携带 token，可以放在请求头，也可以放在 query 中：
 
@@ -663,6 +667,8 @@ SSE_EDGE_URL=https://your-express-api.example.com/sse
 
 - `eventKind: "message"` 代表用户可见消息，前端公共消息组件会弹窗或确认
 - `eventKind: "sync"` 代表页面同步事件，只用于页面刷新状态
+- SSE 连接支持通过 query `clientId` 或请求头 `x-sse-client-id` 传入客户端标识；后端会按 `userId + clientId` 替换旧连接，避免同一设备重复连接导致同一条消息被投递多次
+- 小程序进入后台时应调用 SSE `DELETE` 入口主动关闭当前 `clientId`，否则微信或运行时可能短时间保留网络连接，导致后端仍返回 `delivered > 0`
 - Express SSE 当前使用进程内存保存连接，只适合单实例部署
 - 如果 Express 后续多实例部署，需要改成 Redis pub/sub 或负载均衡 sticky session
 - Nginx 反代 SSE 时需要关闭响应缓冲，并调大超时时间

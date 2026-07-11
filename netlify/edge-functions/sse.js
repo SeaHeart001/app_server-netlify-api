@@ -2,6 +2,7 @@ import {SSE_CORS_HEADERS, SSE_STREAM_HEADERS} from '../../realtime/constants.mjs
 import {
     assertUserPayload,
     createRealtimeError,
+    getClientIdFromRequestParts,
     getRealtimeErrorMessage,
     getRealtimeErrorStatus,
     getTokenFromRequestParts
@@ -10,6 +11,7 @@ import {arrayBufferToBase64Url, decodeJwtParts} from '../../realtime/jwt.mjs';
 import {encodeSseEvent} from '../../realtime/sseCodec.mjs';
 import {openRealtimeSession} from '../../realtime/session.mjs';
 import {publishRealtimePayload} from '../../realtime/publisher.mjs';
+import {closeRealtimeClients} from '../../realtime/channelStore.mjs';
 
 const encoder = new TextEncoder();
 
@@ -79,12 +81,17 @@ function writeEvent(controller, name, data) {
 async function openStream(request) {
     const decoded = await verifyJwt(getToken(request));
     const userId = String(decoded.id);
+    const clientId = getClientIdFromRequestParts({
+        clientId: request.headers.get('x-sse-client-id') || '',
+        url: request.url
+    });
 
     let cleanup = function () {};
     const body = new ReadableStream({
         start(controller) {
             cleanup = openRealtimeSession({
                 userId,
+                clientId,
                 sendEvent(name, data) {
                     writeEvent(controller, name, data);
                 },
@@ -128,6 +135,29 @@ async function publish(request) {
     return jsonResponse(200, result);
 }
 
+async function closeClient(request) {
+    const decoded = await verifyJwt(getToken(request));
+    const userId = String(decoded.id);
+    const clientId = getClientIdFromRequestParts({
+        clientId: request.headers.get('x-sse-client-id') || '',
+        url: request.url
+    });
+    const result = closeRealtimeClients({userId, clientId});
+
+    console.info('SSE client close requested', {
+        userId,
+        clientId,
+        closed: result.closed,
+        totalClients: result.totalClients,
+        channels: result.channels
+    });
+
+    return jsonResponse(200, {
+        ok: true,
+        closed: result.closed
+    });
+}
+
 export default async function handler(request) {
     if (request.method === 'OPTIONS') {
         return new Response('', {
@@ -139,6 +169,10 @@ export default async function handler(request) {
     try {
         if (request.method === 'POST') {
             return await publish(request);
+        }
+
+        if (request.method === 'DELETE') {
+            return await closeClient(request);
         }
 
         if (request.method === 'GET') {

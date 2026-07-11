@@ -31,6 +31,30 @@ export function getTokenFromRequestParts({authorization, url}) {
     return getBearerToken(authorization) || getTokenFromUrl(url);
 }
 
+export function normalizeRealtimeClientId(value) {
+    return String(value || '')
+        .trim()
+        .replace(/[^a-zA-Z0-9._:-]/g, '')
+        .slice(0, 80);
+}
+
+export function getClientIdFromUrl(url) {
+    if (!url) {
+        return '';
+    }
+
+    try {
+        const parsedUrl = new URL(url, 'http://localhost');
+        return normalizeRealtimeClientId(parsedUrl.searchParams.get('clientId') || parsedUrl.searchParams.get('client_id') || '');
+    } catch (err) {
+        return '';
+    }
+}
+
+export function getClientIdFromRequestParts({clientId, url}) {
+    return normalizeRealtimeClientId(clientId) || getClientIdFromUrl(url) || 'default';
+}
+
 export function assertUserPayload(decoded) {
     if (!decoded || decoded.type !== 'user' || !decoded.id) {
         throw createRealtimeError(401, AUTH_ERROR_MESSAGE);

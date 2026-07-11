@@ -9,9 +9,14 @@ function getUserKey(userId) {
     return String(userId || '');
 }
 
-export function createRealtimeClient({userId, send}) {
+function getClientKey(clientId) {
+    return String(clientId || 'default');
+}
+
+export function createRealtimeClient({userId, clientId, send}) {
     return {
         userId: getUserKey(userId),
+        clientId: getClientKey(clientId),
         sentIds: new Set(),
         send
     };
@@ -19,12 +24,29 @@ export function createRealtimeClient({userId, send}) {
 
 export function addRealtimeClient(client) {
     if (!client || !client.userId) {
-        return;
+        return {replaced: 0};
     }
 
     const clients = state.channels.get(client.userId) || new Set();
+    let replaced = 0;
+
+    Array.from(clients).forEach(existingClient => {
+        if (existingClient === client || existingClient.clientId !== client.clientId) {
+            return;
+        }
+
+        replaced += 1;
+        if (typeof existingClient.close === 'function') {
+            existingClient.close('replaced');
+        } else {
+            clients.delete(existingClient);
+        }
+    });
+
     clients.add(client);
     state.channels.set(client.userId, clients);
+
+    return {replaced};
 }
 
 export function removeRealtimeClient(client) {
@@ -41,6 +63,40 @@ export function removeRealtimeClient(client) {
     if (!clients.size) {
         state.channels.delete(client.userId);
     }
+}
+
+export function closeRealtimeClients({userId, clientId}) {
+    const userKey = getUserKey(userId);
+    const clientKey = getClientKey(clientId);
+    const clients = state.channels.get(userKey);
+    let closed = 0;
+
+    if (!clients) {
+        return {
+            closed,
+            totalClients: getTotalClientCount(),
+            channels: getChannelCount()
+        };
+    }
+
+    Array.from(clients).forEach(client => {
+        if (client.clientId !== clientKey) {
+            return;
+        }
+
+        closed += 1;
+        if (typeof client.close === 'function') {
+            client.close('client_offline');
+        } else {
+            removeRealtimeClient(client);
+        }
+    });
+
+    return {
+        closed,
+        totalClients: getTotalClientCount(),
+        channels: getChannelCount()
+    };
 }
 
 export function getChannelCount() {
