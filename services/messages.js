@@ -17,10 +17,36 @@ const MESSAGE_ACTIONS = {
     READ: 'read'
 };
 
+const MESSAGE_CLEANUP_RETENTION_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const CLEANUP_HANDLED_STATES = [
+    ACTION_STATES.ACCEPTED,
+    ACTION_STATES.DECLINED,
+    ACTION_STATES.EXPIRED
+];
+
 function assertValidObjectId(value, fieldName) {
     if (!value || !mongoose.Types.ObjectId.isValid(value)) {
         throw error(400, `参数 ${fieldName} 无效`);
     }
+}
+
+function getCleanupCutoffDate(now = new Date()) {
+    return new Date(now.getTime() - MESSAGE_CLEANUP_RETENTION_DAYS * DAY_MS);
+}
+
+function getCleanupMessageQuery(cutoffDate) {
+    return {
+        updatedAt: {$lt: cutoffDate},
+        actionState: {$ne: ACTION_STATES.PENDING},
+        $or: [
+            {actionState: {$in: CLEANUP_HANDLED_STATES}},
+            {
+                actionState: ACTION_STATES.NONE,
+                readAt: {$exists: true, $ne: null}
+            }
+        ]
+    };
 }
 
 async function readMessage({event, body}) {
@@ -117,6 +143,19 @@ async function events({event}) {
     };
 }
 
+async function cleanupMessages(options = {}) {
+    const cutoffDate = options.cutoffDate || getCleanupCutoffDate(options.now || new Date());
+    const query = getCleanupMessageQuery(cutoffDate);
+    const result = await Message.deleteMany(query);
+
+    return {
+        ok: true,
+        retentionDays: MESSAGE_CLEANUP_RETENTION_DAYS,
+        cutoffAt: cutoffDate.toISOString(),
+        deleted: Number(result.deletedCount || result.n || 0)
+    };
+}
+
 const router = {
     action: messageAction,
     events
@@ -125,7 +164,9 @@ const router = {
 const routes = Object.keys(router);
 
 module.exports = {
+    cleanupMessages,
     events,
+    getCleanupMessageQuery,
     messageAction,
     router,
     routes

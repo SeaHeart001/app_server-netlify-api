@@ -27,6 +27,7 @@
 - `DNS_SERVERS`：本地 SRV 解析用 DNS 列表，例如 `8.8.8.8,1.1.1.1`
 - `PORT`：Express 监听端口，默认 `3000`
 - `JSON_BODY_LIMIT`：Express JSON 请求体大小限制，默认 `8mb`
+- `MESSAGE_CLEANUP_JOB_ENABLED`：Express 消息清理定时任务开关，默认启用；设为 `false` 可关闭
 
 ### Netlify 线上配置
 
@@ -49,11 +50,13 @@ npx netlify env:import .env
 - `services/*.js`：接口业务代码，Netlify Functions 和 Express Routers 共用
 - `realtime/*.mjs`：实时消息共享模块，供 Netlify Edge SSE 和 Express SSE 共用
 - `routers/*.js`：Express 路由入口，只挂载短路径，例如 `/users/login`
+- `routers/jobs/messagesCleanup.js`：消息清理定时任务，供 Express 启动后按日执行，不暴露 HTTP 接口
 - `app.js`：Express 应用配置
 - `server.js`：Express 本地/服务器启动入口
 - `netlify/functions/users.js`：注册、登录、资料更新、账号搜索、关系查询
 - `netlify/functions/relations.js`：关系模块，负责发起绑定请求
 - `netlify/functions/messages.js`：消息模块，负责消息动作和未读消息拉取
+- `netlify/functions/messages-cleanup-scheduled.js`：Netlify 定时函数，清理 7 天前已读/已处置消息
 - `netlify/functions/files.js`：图片上传到 Gitee
 - `netlify/edge-functions/sse.js`：SSE 连接和事件发布
 - `utils/auth.js`：JWT 鉴权和用户脱敏
@@ -437,6 +440,34 @@ Express: GET /sse
 { "events": [] }
 ```
 
+#### 定时清理消息
+
+当前没有开放手动清理接口。清理逻辑由 `services/messages.js` 中的 `cleanupMessages()` 提供。
+
+Netlify 使用定时函数 `netlify/functions/messages-cleanup-scheduled.js` 每天执行一次。
+
+Express 模式在 `server.js` 启动成功后调用 `routers/jobs/messagesCleanup.js` 注册进程内定时任务，默认每天本地时间 0 点执行一次。需要关闭时配置：
+
+```bash
+MESSAGE_CLEANUP_JOB_ENABLED=false
+```
+
+如果 Express 后续部署为多实例，每个实例都会注册自己的定时任务，清理操作本身按条件删除不会影响待处理消息，但会存在重复执行。多实例生产部署时再考虑改成单独调度任务。
+
+清理保留期固定为 7 天，按 `updatedAt` 计算。清理条件：
+
+- 永远不清理 `actionState === "pending"` 的待处理消息
+- 清理 7 天前 `actionState` 为 `accepted`、`declined`、`expired` 的已处置消息
+- 清理 7 天前 `actionState === "none"` 且 `readAt` 存在的已读普通通知
+- 不清理 `actionState === "none"` 但 `readAt` 为空的未读普通通知
+
+Netlify 定时配置在 `netlify.toml`：
+
+```toml
+[functions."messages-cleanup-scheduled"]
+  schedule = "@daily"
+```
+
 返回的事件已经做了前端所需的字段归一化，包含：
 
 - `id`
@@ -465,6 +496,8 @@ Express: GET /sse
 - `eventKind` 表示前端处理用途：
   - `message`：用户可见消息，交给公共消息组件弹窗、确认、已读
   - `sync`：页面同步事件，只给页面刷新状态，不弹窗、不已读
+- `eventKind: "message"` 的用户可见消息必须先写入 `messages` 表，再通过 SSE 推给前端；如果 SSE 没收到，前端后续还能通过 `/messages/events` 拉取未读消息补偿
+- `eventKind: "sync"` 的页面同步事件通常不写入 `messages` 表，只通过 SSE 临时发布；例如 `relation_changed` 只用于通知当前在线页面刷新关系状态，离线丢失也不影响最终数据，因为页面重新进入时应主动调用业务查询接口刷新
 - 只要 `readAt` 为空，就可以认为这条消息还没有被前端确认
 - 如果你只是想判断“有没有未处理消息”，优先查 `readAt`
 - 如果要判断“是否已经通过 SSE 发到前台”，再看 `deliveryState`
