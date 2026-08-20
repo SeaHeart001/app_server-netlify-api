@@ -1,5 +1,7 @@
 const express = require('express');
 const {headers: defaultHeaders} = require('./index');
+const {ACTIVITY_SIGNALS} = require('./features/analyticsEvents');
+const {getUserIdFromToken, trackFromEvent} = require('./analytics');
 
 function buildEvent(req) {
     return {
@@ -56,11 +58,30 @@ function createServiceRouter(serviceRouter) {
         }
 
         try {
-            await sendResult(res, await route({
-                event: buildEvent(req),
+            const event = buildEvent(req);
+            const result = await route({
+                event,
                 context: {},
                 body: req.body || {}
-            }));
+            });
+
+            // 活跃信号：中间件注入 _analytics
+            const activityType = ACTIVITY_SIGNALS[event.path];
+            if (activityType) {
+                const userId = getUserIdFromToken(event);
+                if (userId) {
+                    result._analytics = result._analytics || [];
+                    result._analytics.push({userId, type: activityType, properties: {path: event.path}});
+                }
+            }
+
+            // 统一处理所有追踪事件
+            if (result && Array.isArray(result._analytics)) {
+                trackFromEvent(result._analytics);
+                delete result._analytics;
+            }
+
+            await sendResult(res, result);
         } catch (err) {
             sendError(res, err);
         }

@@ -1,16 +1,18 @@
 const mongoose = require('mongoose');
 const {User} = require('../db/model/userModel');
 const {Message} = require('../db/model/messageModel');
+const {MessageType} = require('../db/model/messageTypeModel');
 const {error} = require('../utils');
 const {getCurrentUser} = require('../utils/auth');
 const {
+    ACTION_KINDS,
     ACTION_STATES,
     DELIVERY_STATES,
     MESSAGE_TYPES,
     NOTIFY_CHANNELS,
     notifyMessageEvent
 } = require('../utils/messages');
-const {ACTION_KINDS} = require('../utils/messageHandlers/messageActions');
+const {ANALYTICS_TYPES} = require('../utils/features/analyticsEvents');
 const {
     createRelationKey,
     findActiveBinding,
@@ -20,25 +22,10 @@ const {
     getUserId
 } = require('../utils/relations');
 
-const RELATION_MESSAGE_TITLE_MAX_LENGTH = 20;
-const RELATION_MESSAGE_CONTENT_MAX_LENGTH = 60;
-const DEFAULT_RELATION_MESSAGE_TITLE = '消息通知';
-const DEFAULT_RELATION_MESSAGE_CONTENT = '对方拍了拍你';
-
 function assertValidObjectId(value, fieldName) {
     if (!value || !mongoose.Types.ObjectId.isValid(value)) {
         throw error(400, `参数 ${fieldName} 无效`);
     }
-}
-
-function normalizeRelationMessageTitle(value) {
-    const title = String(value || '').trim();
-    return (title || DEFAULT_RELATION_MESSAGE_TITLE).slice(0, RELATION_MESSAGE_TITLE_MAX_LENGTH);
-}
-
-function normalizeRelationMessageContent(value) {
-    const content = String(value || '').trim();
-    return (content || DEFAULT_RELATION_MESSAGE_CONTENT).slice(0, RELATION_MESSAGE_CONTENT_MAX_LENGTH);
 }
 
 async function bindRequest({event, body}) {
@@ -114,9 +101,15 @@ async function sendMessage({event, body}) {
         throw error(404, '绑定账号不存在');
     }
 
+    const messageTypeDoc = await MessageType.findOne({code: body.messageType || 'pat'});
+    if (!messageTypeDoc) {
+        throw error(400, '消息类型不存在');
+    }
+
     const now = new Date();
-    const title = normalizeRelationMessageTitle(body.title);
-    const content = normalizeRelationMessageContent(body.content || body.message || body.text);
+    const title = messageTypeDoc.defaultTitle;
+    const content = messageTypeDoc.defaultContent;
+
     const notice = await Message.create({
         type: MESSAGE_TYPES.RELATION_MESSAGE,
         fromUser: user._id,
@@ -124,8 +117,10 @@ async function sendMessage({event, body}) {
         relationKey: binding.relationKey,
         title,
         content,
+        messageType: messageTypeDoc.code,
         payload: {
-            relationKey: binding.relationKey
+            relationKey: binding.relationKey,
+            messageType: messageTypeDoc.code
         },
         actionState: ACTION_STATES.NONE,
         notifyChannels: [NOTIFY_CHANNELS.REALTIME, NOTIFY_CHANNELS.SUBSCRIBE],
@@ -144,7 +139,17 @@ async function sendMessage({event, body}) {
 
     return {
         message: '已发送',
-        event: realtimeEvent
+        event: realtimeEvent,
+        targetUserId: getUserId(targetUser),
+        _analytics: [{
+            userId: currentUserId,
+            type: ANALYTICS_TYPES.RELATION_MESSAGE,
+            properties: {
+                targetUserId: getUserId(targetUser),
+                messageType: messageTypeDoc.code,
+                messageTypeName: messageTypeDoc.name
+            }
+        }]
     };
 }
 

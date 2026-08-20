@@ -1,9 +1,6 @@
 const {error} = require('../index');
+const {ACTION_KINDS} = require('../messages');
 const {handleRelationBindAccepted, handleRelationBindDeclined} = require('./relationHandler');
-
-const ACTION_KINDS = {
-    RELATION_BIND: 'relation.bind'
-};
 
 const ACCEPT_HANDLERS = {
     [ACTION_KINDS.RELATION_BIND]: handleRelationBindAccepted

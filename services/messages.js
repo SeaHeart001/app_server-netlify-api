@@ -9,7 +9,7 @@ const {
     markMessageDelivered
 } = require('../utils/messages');
 const {getUserId} = require('../utils/relations');
-const {runAcceptedBusiness, runDeclinedBusiness} = require('../utils/messageHandlers/messageActions');
+const {runAcceptedBusiness, runDeclinedBusiness} = require('../utils/features/messageActions');
 
 const MESSAGE_ACTIONS = {
     ACCEPT: 'accept',
