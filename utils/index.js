@@ -1,4 +1,6 @@
 const {connect} = require('../db');
+const {ACTIVITY_SIGNALS} = require('./features/analyticsEvents');
+const {getUserIdFromToken, trackFromEvent} = require('./analytics');
 
 const headers = {
     'Access-Control-Allow-Origin': process.env.CORS_ORIGIN || '*',
@@ -88,7 +90,25 @@ function createHandler(router, options = {}) {
                 await connect();
             }
 
-            return normalize(await route({event, context, body}));
+            const result = await route({event, context, body});
+
+            // 活跃信号：中间件注入 _analytics
+            const activityType = ACTIVITY_SIGNALS[event.path];
+            if (activityType) {
+                const userId = getUserIdFromToken(event);
+                if (userId) {
+                    result._analytics = result._analytics || [];
+                    result._analytics.push({userId, type: activityType, properties: {path: event.path}});
+                }
+            }
+
+            // 统一处理所有追踪事件
+            if (result && Array.isArray(result._analytics)) {
+                trackFromEvent(result._analytics);
+                delete result._analytics;
+            }
+
+            return normalize(result);
         } catch (err) {
             if (!err.statusCode || err.statusCode >= 500) {
                 console.error(err);

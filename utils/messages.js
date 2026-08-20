@@ -22,6 +22,10 @@ const ACTION_STATES = {
     NONE: 'none'
 };
 
+const ACTION_KINDS = {
+    RELATION_BIND: 'relation.bind'
+};
+
 const DELIVERY_STATES = {
     PENDING: 'pending',
     DELIVERED: 'delivered'
@@ -245,6 +249,7 @@ async function notifyMessageEvent(message, currentUserId, userIds, event, format
 
 module.exports = {
     ACTION_STATES,
+    ACTION_KINDS,
     DELIVERY_STATES,
     EVENT_KINDS,
     MESSAGE_TYPES,

@@ -31,6 +31,11 @@ const MessageSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    messageType: {
+        type: String,
+        default: '',
+        index: true
+    },
     payload: {
         type: mongoose.Schema.Types.Mixed,
         default: function () {

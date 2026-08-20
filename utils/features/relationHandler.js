@@ -2,6 +2,7 @@ const {Message} = require('../../db/model/messageModel');
 const {User} = require('../../db/model/userModel');
 const {error} = require('../index');
 const {
+    ACTION_KINDS,
     ACTION_STATES,
     DELIVERY_STATES,
     EVENT_KINDS,
@@ -17,6 +18,7 @@ const {
     getAccountName,
     getUserId
 } = require('../relations');
+const {ANALYTICS_TYPES} = require('./analyticsEvents');
 
 async function handleRelationBindAccepted({event, message, user}) {
     const requester = await User.findById(message.fromUser);
@@ -62,7 +64,11 @@ async function handleRelationBindAccepted({event, message, user}) {
 
     return {
         relation: accepterRelation,
-        message: '已完成绑定'
+        message: '已完成绑定',
+        _analytics: [
+            {userId: getUserId(user), type: ANALYTICS_TYPES.ACTION_ACCEPTED, properties: {actionKind: ACTION_KINDS.RELATION_BIND, targetUserId: getUserId(requester)}},
+            {userId: getUserId(requester), type: ANALYTICS_TYPES.ACTION_ACCEPTED, properties: {actionKind: ACTION_KINDS.RELATION_BIND, targetUserId: getUserId(user)}}
+        ]
     };
 }
 
