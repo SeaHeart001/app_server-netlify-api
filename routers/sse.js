@@ -8,14 +8,16 @@ const realtimePromise = Promise.all([
     import('../realtime/sseCodec.mjs'),
     import('../realtime/session.mjs'),
     import('../realtime/publisher.mjs'),
-    import('../realtime/channelStore.mjs')
-]).then(([constants, auth, sseCodec, session, publisher, channelStore]) => ({
+    import('../realtime/channelStore.mjs'),
+    import('../realtime/ablyBridge.mjs')
+]).then(([constants, auth, sseCodec, session, publisher, channelStore, ablyBridge]) => ({
     ...constants,
     ...auth,
     ...sseCodec,
     ...session,
     ...publisher,
-    ...channelStore
+    ...channelStore,
+    ...ablyBridge
 }));
 
 async function getRealtime() {
@@ -56,15 +58,18 @@ async function openStream(req, res) {
         url: getRequestUrl(req)
     });
 
+    // Send the stream headers before registering this connection. The client
+    // still receives no `ready` event until the Ably subscription is usable.
     res.status(200);
     setHeaders(res, realtime.SSE_STREAM_HEADERS);
     if (typeof res.flushHeaders === 'function') {
         res.flushHeaders();
     }
 
-    const cleanup = realtime.openRealtimeSession({
+    const sessionCleanup = realtime.openRealtimeSession({
         userId,
         clientId,
+        deferReady: true,
         sendEvent(name, data) {
             res.write(realtime.formatSseEvent(name, data));
         },
@@ -79,8 +84,33 @@ async function openStream(req, res) {
         logLabel: 'SSE client connected'
     });
 
+    let cleaned = false;
+    const cleanup = function () {
+        // req 的 close / error 可能先后触发，只清理一次
+        if (cleaned) {
+            return;
+        }
+        cleaned = true;
+        sessionCleanup();
+        // 本进程内该用户最后一条连接关闭后释放 Ably 订阅
+        // （内部带宽限期复查，连接替换时不会误释放）
+        realtime.releaseUserSubscription(userId);
+    };
+
     req.on('close', cleanup);
     req.on('error', cleanup);
+
+    // Ably：确保本进程已订阅该用户的频道（与 Edge 版对称），
+    // 配置 ABLY_API_KEY 时发布端经 Ably 扇出的事件才能投递到这条连接；
+    // 未配置时为空操作，行为退化为原内存直推
+    try {
+        await realtime.ensureUserSubscription(userId);
+    } catch (err) {
+        cleanup();
+        throw err;
+    }
+
+    sessionCleanup.sendReady();
 }
 
 async function publish(req, res) {
