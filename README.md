@@ -22,6 +22,8 @@
 - `GITEE_ACCESS_TOKEN`：Gitee 图床上传令牌
 - `SSE_PUBLISH_SECRET`：SSE 发布校验密钥，不配置时回退到 `JWT_SECRET`
 - `SSE_EDGE_URL`：SSE 发布地址覆盖项；Express 运行并启用实时推送时应配置为 `https://your-express-api.example.com/sse`
+- `ABLY_API_KEY`：Ably API Key。配置后 SSE 事件经 Ably 全球骨干广播到各 Edge isolate，解决 isolate 间内存连接表不共享导致的丢消息；不配置时回退到 HTTP 直推 SSE 端点。Netlify 部署时变量作用域需同时覆盖 `Functions` 和 `Edge Functions`
+- `DELIVERY_ACK_WAIT_SECONDS`：送达回执判定窗口（秒）。后台任务在 SSE 推送后等待前端确认（`readAt` / `deliveryState`），窗口内无确认才降级发微信订阅消息，默认 `5`
 - `JWT_EXPIRES_IN`：JWT 有效期，默认 `7d`
 - `CORS_ORIGIN`：CORS 来源，默认 `*`
 - `DNS_SERVERS`：本地 SRV 解析用 DNS 列表，例如 `8.8.8.8,1.1.1.1`
@@ -33,7 +35,7 @@
 
 进入 Netlify 项目后，在 `Project configuration > Environment variables` 中添加上述变量。
 
-如果项目已经绑定了作用域，变量作用域需要包含 `Functions`。
+如果项目已经绑定了作用域，变量作用域需要包含 `Functions`；涉及 SSE 的变量（如 `ABLY_API_KEY`、`JWT_SECRET`）还需要包含 `Edge Functions`。
 
 本地如果想把 `.env` 导入到 Netlify，可以执行：
 
@@ -60,6 +62,7 @@ npx netlify env:import .env
 - `netlify/functions/message-types.js`：消息类型管理，负责消息类型的增删改查
 - `netlify/functions/report.js`：年度报告生成
 - `netlify/functions/messages-cleanup-scheduled.js`：Netlify 定时函数，清理 7 天前已读/已处置消息
+- `netlify/functions/message-delivery-background.js`：Netlify 后台函数，等待送达确认后决定是否降级发送小程序订阅消息
 - `netlify/functions/files.js`：图片上传到 Gitee
 - `netlify/edge-functions/sse.js`：SSE 连接和事件发布
 - `utils/auth.js`：JWT 鉴权和用户脱敏
@@ -808,6 +811,38 @@ Express：
 - `POST /sse`：向已连接客户端发布事件
 - `DELETE /sse`：客户端主动关闭当前 `clientId` 对应的 SSE 连接
 
+### 投递架构（Netlify Edge / Express）
+
+Netlify Functions 和 Express Router 都复用同一份 `services/*.js` 业务代码。需要通知时，都会走以下公共链路：
+
+```text
+写入 messages -> formatMessageEvent -> publishRealtimeEvent -> queueDeliveryAttempt
+```
+
+因此，Ably REST 发布、HTTP SSE 降级、送达确认判定和小程序订阅消息发送都由 `utils/messages.js` 统一决定；区别只在于运行时如何承载 SSE 连接和执行异步送达任务：
+
+| 运行环境 | 实时消息接收 | 订阅消息兜底 |
+| --- | --- | --- |
+| Netlify | Edge Function 持有 SSE 连接，并通过 Ably 订阅投递 | 调用 `message-delivery-background` Background Function |
+| Express | Express 进程持有 SSE 连接，并通过同一 Ably 订阅桥投递 | 进程内非阻塞定时任务调用同一送达判定函数 |
+
+Netlify Edge Functions 是多隔离环境（isolate），SSE 连接表只存在于单个 isolate 的内存中，发布请求落到其它 isolate 时消息会丢失。因此：
+
+- 配置 `ABLY_API_KEY` 后，发布端改走 Ably REST（每用户一个频道 `user:{userId}`），持有连接的运行环境（Edge isolate 或 Express 进程）通过 Ably `/sse` 订阅对应频道并在本地投递；下游连接只会在上游订阅可用后收到 `ready`，重连会携带最后一个 Ably 事件 ID 补齐窗口内消息；
+- Ably 仅部分发布成功时，失败频道会降级到原有 HTTP 直推 SSE 端点，不再静默忽略。
+
+### 送达回执判定与订阅消息降级
+
+“用户是否在小程序内”不再依赖 SSE 连接表，而是逐条判定：实时消息推送后等待 `DELIVERY_ACK_WAIT_SECONDS` 窗口，查消息是否被前端确认。用户的发消息请求不会等待此窗口：
+
+- 回执来源均为现有行为，前端零新增调用：通知类消息弹窗时前端自动调 `/messages/action`（`read`）写入 `readAt`；重连拉取 `/messages/events` 未读时后端标记 `deliveryState`；
+- 窗口内有确认：视为接收方在小程序内收到了，不发微信订阅消息；
+- 窗口内无确认：降级为微信订阅消息；
+- 已知代价：操作类消息的回执依赖用户点击同意/拒绝，窗口内未处理会多推一条订阅消息（量少且订阅消息本就作提醒用，可接受）；
+- 兜底：客户端每次（重）连接后拉取 `/messages/events` 补漏。
+
+Netlify 使用 `netlify/functions/message-delivery-background.js` 承载等待和降级逻辑，客户端会立即收到原业务接口响应。该函数只在 Netlify 部署时使用；Express 直接在常驻 Node 进程内启动非阻塞任务，并调用同一送达判定与订阅消息发送逻辑。因此 Express 必须部署为常驻进程；若部署在短生命周期 Serverless 运行时，进程内定时任务可能在执行前被回收，应改用队列或独立任务执行器。
+
 客户端建立连接时需要携带 token，可以放在请求头，也可以放在 query 中：
 
 请求头方式：
@@ -848,7 +883,7 @@ SSE_EDGE_URL=https://your-express-api.example.com/sse
 - `eventKind: "message"` 代表用户可见消息，前端公共消息组件会弹窗或确认
 - `eventKind: "sync"` 代表页面同步事件，只用于页面刷新状态
 - SSE 连接支持通过 query `clientId` 或请求头 `x-sse-client-id` 传入客户端标识；后端会按 `userId + clientId` 替换旧连接，避免同一设备重复连接导致同一条消息被投递多次
-- 小程序进入后台时应调用 SSE `DELETE` 入口主动关闭当前 `clientId`，否则微信或运行时可能短时间保留网络连接，导致后端仍返回 `delivered > 0`
+- 小程序进入后台时可调用 SSE `DELETE` 入口主动关闭当前 `clientId`，及时释放服务端连接；是否降级订阅消息由送达回执判定自动处理，无需额外上报
 - Express SSE 当前使用进程内存保存连接，只适合单实例部署
 - 如果 Express 后续多实例部署，需要改成 Redis pub/sub 或负载均衡 sticky session
 - Nginx 反代 SSE 时需要关闭响应缓冲，并调大超时时间
@@ -1018,6 +1053,8 @@ source.addEventListener("message", event => {
 - `actionState === "none"` 时弹普通通知，并调用 `/messages/action` 标记已读
 - 页面组件自己监听 `eventKind === "sync"` 或关心的消息 `type`，例如首页监听 `relation_changed` / `binding_accepted` 后调用 `/users/relation`
 - 前端不再从 `message-host` 本地广播 `relation_changed`，关系刷新依赖后端 SSE 同步事件或页面自身 `onShow`
+
+订阅消息降级判定无需前端额外接入：判定依赖的回执就是现有的 `read` 已读调用（通知类消息弹窗时自动触发）和重连后拉取 `/messages/events`，保持现有行为即可。`onAppShow` 或 SSE 每次重连后拉取一次 `/messages/events` 补漏。
 
 ### 图片上传
 

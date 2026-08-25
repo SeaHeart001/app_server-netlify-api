@@ -12,6 +12,7 @@ import {encodeSseEvent} from '../../realtime/sseCodec.mjs';
 import {openRealtimeSession} from '../../realtime/session.mjs';
 import {publishRealtimePayload} from '../../realtime/publisher.mjs';
 import {closeRealtimeClients} from '../../realtime/channelStore.mjs';
+import {ensureUserSubscription, releaseUserSubscription} from '../../realtime/ablyBridge.mjs';
 
 const encoder = new TextEncoder();
 
@@ -88,10 +89,11 @@ async function openStream(request) {
 
     let cleanup = function () {};
     const body = new ReadableStream({
-        start(controller) {
-            cleanup = openRealtimeSession({
+        async start(controller) {
+            const sessionCleanup = openRealtimeSession({
                 userId,
                 clientId,
+                deferReady: true,
                 sendEvent(name, data) {
                     writeEvent(controller, name, data);
                 },
@@ -106,7 +108,25 @@ async function openStream(request) {
                 logLabel: 'SSE client connected'
             });
 
+            cleanup = function () {
+                sessionCleanup();
+                // 本 isolate 内该用户最后一条连接关闭后释放 Ably 订阅
+                // （内部带宽限期复查，连接替换时不会误释放）
+                releaseUserSubscription(userId);
+            };
             request.signal.addEventListener('abort', cleanup);
+
+            // Ably：确保本 isolate 已订阅该用户的频道，
+            // 发布端经 Ably 扇出的事件才能投递到这条连接。
+            // 未配置 ABLY_API_KEY 时为空操作，行为退化为原内存直推
+            try {
+                await ensureUserSubscription(userId);
+                sessionCleanup.sendReady();
+            } catch (err) {
+                cleanup();
+                controller.error(err);
+                return;
+            }
         },
         cancel() {
             cleanup();

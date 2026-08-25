@@ -7,7 +7,7 @@ import {
     removeRealtimeClient
 } from './channelStore.mjs';
 
-export function openRealtimeSession({userId, clientId, sendEvent, close, logger = console, logLabel = 'SSE client connected'}) {
+export function openRealtimeSession({userId, clientId, sendEvent, close, deferReady = false, logger = console, logLabel = 'SSE client connected'}) {
     const client = createRealtimeClient({
         userId,
         clientId,
@@ -53,11 +53,27 @@ export function openRealtimeSession({userId, clientId, sendEvent, close, logger 
         });
     }
 
-    try {
-        sendEvent(SSE_EVENTS.READY, {userId: client.userId, at: Date.now()});
-    } catch (err) {
-        cleanup();
+    let readySent = false;
+    const sendReady = function () {
+        if (closed || readySent) {
+            return;
+        }
+
+        try {
+            sendEvent(SSE_EVENTS.READY, {userId: client.userId, at: Date.now()});
+            readySent = true;
+        } catch (err) {
+            cleanup();
+        }
+    };
+
+    if (!deferReady) {
+        sendReady();
     }
+
+    // Keep the existing function return contract while allowing the caller to
+    // announce readiness only after an upstream subscription is usable.
+    cleanup.sendReady = sendReady;
 
     return cleanup;
 }

@@ -103,6 +103,13 @@ export function getChannelCount() {
     return state.channels.size;
 }
 
+// 某用户在本 isolate 内当前持有的 SSE 连接数，
+// 供 Ably 订阅桥判断是否需要维持/释放该用户的频道订阅
+export function getUserClientCount(userId) {
+    const clients = state.channels.get(getUserKey(userId));
+    return clients ? clients.size : 0;
+}
+
 export function getTotalClientCount() {
     let count = 0;
     state.channels.forEach(clients => {
