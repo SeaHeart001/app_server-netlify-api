@@ -34,6 +34,29 @@ function getRouteName(event) {
     return event.path.split('/').filter(Boolean).pop();
 }
 
+// 把运行时相关的请求路径归一化为业务路径，用于埋点活跃信号匹配。
+// Express 下 event.path 已是业务路径（如 /users/me）；
+// Netlify 下 event.path 带 /.netlify/functions/<fn>/ 前缀（如 /.netlify/functions/users/me），
+// 去掉该前缀后两者都能命中 ACTIVITY_SIGNALS 的业务路径键。
+function normalizeBusinessPath(path) {
+    if (!path) {
+        return path;
+    }
+
+    let p = path;
+    const marker = '/.netlify/functions';
+    const idx = p.indexOf(marker);
+    if (idx !== -1) {
+        p = p.slice(idx + marker.length);
+    }
+
+    if (p.length > 1 && p.endsWith('/')) {
+        p = p.slice(0, -1);
+    }
+
+    return p || '/';
+}
+
 function parseBody(event) {
     if (!event.body) {
         return {};
@@ -93,12 +116,14 @@ function createHandler(router, options = {}) {
             const result = await route({event, context, body});
 
             // 活跃信号：中间件注入 _analytics
-            const activityType = ACTIVITY_SIGNALS[event.path];
+            // 归一化业务路径后再匹配，保证 Express 与 Netlify 两套运行时都能命中
+            const activityPath = normalizeBusinessPath(event.path);
+            const activityType = ACTIVITY_SIGNALS[activityPath];
             if (activityType) {
                 const userId = getUserIdFromToken(event);
                 if (userId) {
                     result._analytics = result._analytics || [];
-                    result._analytics.push({userId, type: activityType, properties: {path: event.path}});
+                    result._analytics.push({userId, type: activityType, properties: {path: activityPath}});
                 }
             }
 
@@ -120,4 +145,4 @@ function createHandler(router, options = {}) {
     };
 }
 
-module.exports = {createHandler, error, getHeader, headers, response};
+module.exports = {createHandler, error, getHeader, headers, response, normalizeBusinessPath};

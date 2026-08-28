@@ -1,5 +1,5 @@
 const express = require('express');
-const {headers: defaultHeaders} = require('./index');
+const {headers: defaultHeaders, normalizeBusinessPath} = require('./index');
 const {ACTIVITY_SIGNALS} = require('./features/analyticsEvents');
 const {getUserIdFromToken, trackFromEvent} = require('./analytics');
 
@@ -66,12 +66,14 @@ function createServiceRouter(serviceRouter) {
             });
 
             // 活跃信号：中间件注入 _analytics
-            const activityType = ACTIVITY_SIGNALS[event.path];
+            // 归一化业务路径后再匹配，保证 Express 与 Netlify 两套运行时都能命中
+            const activityPath = normalizeBusinessPath(event.path);
+            const activityType = ACTIVITY_SIGNALS[activityPath];
             if (activityType) {
                 const userId = getUserIdFromToken(event);
                 if (userId) {
                     result._analytics = result._analytics || [];
-                    result._analytics.push({userId, type: activityType, properties: {path: event.path}});
+                    result._analytics.push({userId, type: activityType, properties: {path: activityPath}});
                 }
             }
 
